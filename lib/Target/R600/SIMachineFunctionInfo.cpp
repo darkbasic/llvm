@@ -12,6 +12,7 @@
 #include "SIMachineFunctionInfo.h"
 #include "SIInstrInfo.h"
 #include "SIRegisterInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
@@ -26,8 +27,22 @@ void SIMachineFunctionInfo::anchor() {}
 
 SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   : AMDGPUMachineFunction(MF),
+    SpillTIDVirtualReg(AMDGPU::NoRegister),
     PSInputAddr(0),
-    SpillTracker() { }
+    SpillTracker(),
+    LDSWaveSpillSize(0),
+    HasCalculatedTIDOffset(false) { }
+
+static void addFunctionLiveOut(unsigned Reg, MachineFunction *MF) {
+  for (MachineBasicBlock &MBB : *MF) {
+    if (MBB.back().getOpcode() == AMDGPU::S_ENDPGM) {
+      MBB.back().addOperand(*MF, MachineOperand::CreateReg(Reg, false, true));
+      return;
+    }
+  }
+  MF->getFunction()->getContext().emitError(
+      "Could not found S_ENGPGM instrtuction.");
+}
 
 static unsigned createLaneVGPR(MachineRegisterInfo &MRI, MachineFunction *MF) {
   unsigned VGPR = MRI.createVirtualRegister(&AMDGPU::VReg_32RegClass);
@@ -55,15 +70,8 @@ static unsigned createLaneVGPR(MachineRegisterInfo &MRI, MachineFunction *MF) {
   //
   // To work around this, we add Lane VGPRs to the functions live out list,
   // so that we can guarantee its live range will cover all of its uses.
+  addFunctionLiveOut(VGPR, MF);
 
-  for (MachineBasicBlock &MBB : *MF) {
-    if (MBB.back().getOpcode() == AMDGPU::S_ENDPGM) {
-      MBB.back().addOperand(*MF, MachineOperand::CreateReg(VGPR, false, true));
-      return VGPR;
-    }
-  }
-  MF->getFunction()->getContext().emitError(
-      "Could not found S_ENGPGM instrtuction.");
   return VGPR;
 }
 
@@ -91,4 +99,29 @@ void SIMachineFunctionInfo::RegSpillTracker::addSpilledReg(unsigned FrameIndex,
 const SIMachineFunctionInfo::SpilledReg&
 SIMachineFunctionInfo::RegSpillTracker::getSpilledReg(unsigned FrameIndex) {
   return SpilledRegisters[FrameIndex];
+}
+
+unsigned SIMachineFunctionInfo::getSpillTIDVirtualReg(
+                                                 MachineRegisterInfo &MRI,
+                                                 MachineFunction *MF) {
+  if (SpillTIDVirtualReg == AMDGPU::NoRegister) {
+    SpillTIDVirtualReg = MRI.createVirtualRegister(&AMDGPU::VReg_32RegClass);
+    MachineBasicBlock &Entry = MF->front();
+    MachineBasicBlock::iterator Insert = Entry.front();
+    Insert->addOperand(MachineOperand::CreateReg(SpillTIDVirtualReg,
+                                                 true, true));
+    addFunctionLiveOut(SpillTIDVirtualReg, MF);
+  }
+
+  return SpillTIDVirtualReg;
+}
+
+unsigned SIMachineFunctionInfo::allocateLDSSpaceForSpill(unsigned FrameIndex,
+                                                         unsigned NumBytes) {
+  if (!LDSSpillOffsets.count(FrameIndex)) {
+    LDSSpillOffsets[FrameIndex] = LDSWaveSpillSize;
+    LDSWaveSpillSize += NumBytes;
+  }
+
+  return LDSSpillOffsets[FrameIndex];
 }

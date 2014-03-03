@@ -224,8 +224,25 @@ void SIInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
     BuildMI(MBB, MI, DL, get(Opcode), MFI->SpillTracker.LaneVGPR)
             .addReg(SrcReg)
             .addImm(FrameIndex);
+  } else if(RI.hasVGPRs(RC)) {
+    unsigned Opcode;
+    switch(RC->getSize() * 8) {
+    case 32: Opcode = AMDGPU::SI_SPILL_V32_SAVE; break;
+    case 64: Opcode = AMDGPU::SI_SPILL_V64_SAVE; break;
+    case 96: Opcode = AMDGPU::SI_SPILL_V96_SAVE; break;
+    case 128: Opcode = AMDGPU::SI_SPILL_V128_SAVE; break;
+    case 256: Opcode = AMDGPU::SI_SPILL_V256_SAVE; break;
+    case 512: Opcode = AMDGPU::SI_SPILL_V512_SAVE; break;
+    default: llvm_unreachable("Cannot spill register class");
+    }
+    MFI->allocateLDSSpaceForSpill(FrameIndex, RC->getSize());
+    unsigned TmpReg = MRI.createVirtualRegister(&AMDGPU::VGPR_32RegClass);
+    BuildMI(MBB, MI, DL, get(Opcode), TmpReg)
+            .addReg(MFI->getSpillTIDVirtualReg(MRI, MBB.getParent()))
+            .addReg(SrcReg)
+            .addImm(FrameIndex);
   } else {
-    llvm_unreachable("VGPR spilling not supported");
+    llvm_unreachable("Don't know how to spill register class");
   }
 }
 
@@ -235,6 +252,7 @@ void SIInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                        const TargetRegisterClass *RC,
                                        const TargetRegisterInfo *TRI) const {
   SIMachineFunctionInfo *MFI = MBB.getParent()->getInfo<SIMachineFunctionInfo>();
+  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
   DebugLoc DL = MBB.findDebugLoc(MI);
   if (TRI->getCommonSubClass(RC, &AMDGPU::SReg_32RegClass)) {
     SIMachineFunctionInfo::SpilledReg Spill =
@@ -261,9 +279,69 @@ void SIInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
             .addReg(Spill.VGPR)
             .addImm(FrameIndex);
     insertNOPs(MI, 3);
-  } else {
-    llvm_unreachable("VGPR spilling not supported");
+  } else if(RI.hasVGPRs(RC)) {
+    unsigned TmpReg = MRI.createVirtualRegister(&AMDGPU::VGPR_32RegClass);
+    unsigned Opcode;
+    switch(RC->getSize() * 8) {
+    case 32: Opcode = AMDGPU::SI_SPILL_V32_RESTORE; break;
+    case 64: Opcode = AMDGPU::SI_SPILL_V64_RESTORE; break;
+    case 96: Opcode = AMDGPU::SI_SPILL_V96_RESTORE; break;
+    case 128: Opcode = AMDGPU::SI_SPILL_V128_RESTORE; break;
+    case 256: Opcode = AMDGPU::SI_SPILL_V256_RESTORE; break;
+    case 512: Opcode = AMDGPU::SI_SPILL_V512_RESTORE; break;
+    default: llvm_unreachable("Cannot spill register class");
+    }
+    BuildMI(MBB, MI, DL, get(Opcode), DestReg)
+            .addReg(TmpReg, RegState::Define)
+            .addReg(MFI->getSpillTIDVirtualReg(MRI, MBB.getParent()))
+            .addImm(FrameIndex);
   }
+}
+
+/// \param @Offset Offset in bytes of the FrameIndex being spilled
+unsigned SIInstrInfo::calculateLDSSpillAddress(MachineBasicBlock &MBB,
+                                               MachineBasicBlock::iterator MI,
+                                               unsigned TmpReg,
+                                               unsigned TIDOffsetReg,
+                                               unsigned FrameOffset,
+                                               unsigned Size) const {
+  SIMachineFunctionInfo *MFI = MBB.getParent()->getInfo<SIMachineFunctionInfo>();
+  DebugLoc DL = MBB.findDebugLoc(MI);
+  unsigned ThreadsInWave = 64;
+  unsigned LDSOffset = MFI->LDSSize + (FrameOffset * ThreadsInWave);
+
+  if (!MFI->HasCalculatedTIDOffset) {
+    MachineBasicBlock &Entry = MBB.getParent()->front();
+    MachineBasicBlock::iterator Insert = Entry.front();
+    DebugLoc DL = Insert->getDebugLoc();
+    // Get the wave id
+    BuildMI(Entry, Insert, DL, get(AMDGPU::V_MBCNT_LO_U32_B32_e64),
+            TIDOffsetReg)
+            .addImm(-1)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0);
+
+    BuildMI(Entry, Insert, DL, get(AMDGPU::V_MBCNT_HI_U32_B32_e32),
+            TIDOffsetReg)
+            .addImm(-1)
+            .addReg(TIDOffsetReg);
+
+    BuildMI(Entry, Insert, DL, get(AMDGPU::V_LSHLREV_B32_e32),
+            TIDOffsetReg)
+            .addImm(2)
+            .addReg(TIDOffsetReg);
+    MFI->HasCalculatedTIDOffset = true;
+  }
+
+  // Add FrameIndex to LDS offset
+  BuildMI(MBB, MI, DL, get(AMDGPU::V_ADD_I32_e32), TmpReg)
+          .addImm(LDSOffset)
+          .addReg(TIDOffsetReg);
+
+  return TmpReg;
 }
 
 static unsigned getNumSubRegsForSpillOp(unsigned Op) {
@@ -271,16 +349,30 @@ static unsigned getNumSubRegsForSpillOp(unsigned Op) {
   switch (Op) {
   case AMDGPU::SI_SPILL_S512_SAVE:
   case AMDGPU::SI_SPILL_S512_RESTORE:
+  case AMDGPU::SI_SPILL_V512_SAVE:
+  case AMDGPU::SI_SPILL_V512_RESTORE:
     return 16;
   case AMDGPU::SI_SPILL_S256_SAVE:
   case AMDGPU::SI_SPILL_S256_RESTORE:
+  case AMDGPU::SI_SPILL_V256_SAVE:
+  case AMDGPU::SI_SPILL_V256_RESTORE:
     return 8;
   case AMDGPU::SI_SPILL_S128_SAVE:
   case AMDGPU::SI_SPILL_S128_RESTORE:
+  case AMDGPU::SI_SPILL_V128_SAVE:
+  case AMDGPU::SI_SPILL_V128_RESTORE:
     return 4;
+  case AMDGPU::SI_SPILL_V96_SAVE:
+  case AMDGPU::SI_SPILL_V96_RESTORE:
+    return 3;
   case AMDGPU::SI_SPILL_S64_SAVE:
   case AMDGPU::SI_SPILL_S64_RESTORE:
+  case AMDGPU::SI_SPILL_V64_SAVE:
+  case AMDGPU::SI_SPILL_V64_RESTORE:
     return 2;
+  case AMDGPU::SI_SPILL_V32_SAVE:
+  case AMDGPU::SI_SPILL_V32_RESTORE:
+    return 1;
   default: llvm_unreachable("Invalid spill opcode");
   }
 }
@@ -351,7 +443,72 @@ bool SIInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
     MI->eraseFromParent();
     break;
   }
+
+   // VGPR register spill to LDS
+  case AMDGPU::SI_SPILL_V512_SAVE:
+  case AMDGPU::SI_SPILL_V256_SAVE:
+  case AMDGPU::SI_SPILL_V128_SAVE:
+  case AMDGPU::SI_SPILL_V64_SAVE:
+  case AMDGPU::SI_SPILL_V32_SAVE: {
+    unsigned NumSubRegs = getNumSubRegsForSpillOp(MI->getOpcode());
+    unsigned TmpReg = MI->getOperand(0).getReg();
+    unsigned TIDOffsetReg = MI->getOperand(1).getReg();
+    unsigned SrcReg = MI->getOperand(2).getReg();
+    unsigned FrameIndex = MI->getOperand(3).getImm();
+    unsigned Offset = MFI->LDSSpillOffsets[FrameIndex];
+    unsigned Size = NumSubRegs * 4;
+
+    for (unsigned i = 0, e = NumSubRegs; i != e; ++i) {
+      unsigned SubReg = NumSubRegs > 1 ?
+          RI.getPhysRegSubReg(SrcReg, &AMDGPU::VGPR_32RegClass, i) :
+          SrcReg;
+      Offset += (i * 4);
+      unsigned AddrReg = calculateLDSSpillAddress(MBB, MI, TmpReg, TIDOffsetReg,
+                                                  Offset, Size);
+
+      // Store the value in LDS
+      BuildMI(MBB, MI, DL, get(AMDGPU::DS_WRITE_B32))
+              .addImm(0) // gds
+              .addReg(AddrReg) // addr
+              .addReg(SubReg) // data0
+              .addImm(0); // offset
+    }
+
+    MI->eraseFromParent();
+    break;
   }
+  case AMDGPU::SI_SPILL_V32_RESTORE:
+  case AMDGPU::SI_SPILL_V64_RESTORE:
+  case AMDGPU::SI_SPILL_V128_RESTORE:
+  case AMDGPU::SI_SPILL_V256_RESTORE:
+  case AMDGPU::SI_SPILL_V512_RESTORE: {
+    unsigned NumSubRegs = getNumSubRegsForSpillOp(MI->getOpcode());
+    unsigned DstReg = MI->getOperand(0).getReg();
+    unsigned TempReg = MI->getOperand(1).getReg();
+    unsigned TIDOffsetReg = MI->getOperand(2).getReg();
+    unsigned FrameIndex = MI->getOperand(3).getImm();
+    unsigned Offset = MFI->LDSSpillOffsets[FrameIndex];
+    unsigned Size = NumSubRegs * 4;
+
+    // FIXME: We could use DS_READ_B64 here to optimize for larger registers.
+    for (unsigned i = 0, e = NumSubRegs; i != e; ++i) {
+      unsigned SubReg = NumSubRegs > 1 ?
+          RI.getPhysRegSubReg(DstReg, &AMDGPU::VGPR_32RegClass, i) :
+          DstReg;
+
+      Offset += (i * 4);
+      unsigned AddrReg = calculateLDSSpillAddress(MBB, MI, TempReg, TIDOffsetReg,
+                                                  Offset, Size);
+      BuildMI(MBB, MI, DL, get(AMDGPU::DS_READ_B32), SubReg)
+              .addImm(0) // gds
+              .addReg(AddrReg) // addr
+              .addImm(0); //offset
+    }
+    MI->eraseFromParent();
+    break;
+  }
+  }
+
   return true;
 }
 

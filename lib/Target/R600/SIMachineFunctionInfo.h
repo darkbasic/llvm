@@ -26,6 +26,9 @@ class MachineRegisterInfo;
 /// tells the hardware which interpolation parameters to load.
 class SIMachineFunctionInfo : public AMDGPUMachineFunction {
   void anchor() override;
+
+  unsigned SpillTIDVirtualReg;
+
 public:
 
   struct SpilledReg {
@@ -59,6 +62,13 @@ public:
   SIMachineFunctionInfo(const MachineFunction &MF);
   unsigned PSInputAddr;
   struct RegSpillTracker SpillTracker;
+  unsigned LDSWaveSpillSize;
+  bool HasCalculatedTIDOffset;
+  /// Key is FrameIndex, value is byte offset
+  std::map<unsigned, unsigned> LDSSpillOffsets;
+  unsigned getSpillTIDVirtualReg(MachineRegisterInfo &MRI, MachineFunction *MF);
+  /// Returns the wave local offset for this \p FrameIndex
+  unsigned allocateLDSSpaceForSpill(unsigned FrameIndex,  unsigned NumBytes);
 };
 
 } // End namespace llvm
