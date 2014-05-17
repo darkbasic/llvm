@@ -311,7 +311,8 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF,
     LDSAlignShift = 9;
   }
   unsigned LDSBlocks =
-          RoundUpToAlignment(MFI->LDSSize, 1 << LDSAlignShift) >> LDSAlignShift;
+          RoundUpToAlignment(MFI->LDSSize + (MFI->LDSWaveSpillSize * 64),
+	                     1 << LDSAlignShift) >> LDSAlignShift;
 
   if (MFI->ShaderType == ShaderType::COMPUTE) {
     OutStreamer.EmitIntValue(R_00B84C_COMPUTE_PGM_RSRC2, 4);

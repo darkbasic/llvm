@@ -48,6 +48,14 @@ private:
                           MachineInstr *Inst, unsigned Opcode) const;
 
   void addDescImplicitUseDef(const MCInstrDesc &Desc, MachineInstr *MI) const;
+  unsigned calculateLDSSpillAddress(MachineBasicBlock &MBB,
+                                    MachineBasicBlock::iterator MI,
+                                    unsigned TmpReg,
+                                    unsigned TIDOffsetReg,
+                                    unsigned Offset,
+                                    unsigned Size) const;
+
+
 
 public:
   explicit SIInstrInfo(AMDGPUTargetMachine &tm);
