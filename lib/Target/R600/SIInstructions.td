@@ -2392,20 +2392,6 @@ defm : SI_INDIRECT_Pattern <v4i32, i32, SI_INDIRECT_DST_V4>;
 defm : SI_INDIRECT_Pattern <v8i32, i32, SI_INDIRECT_DST_V8>;
 defm : SI_INDIRECT_Pattern <v16i32, i32, SI_INDIRECT_DST_V16>;
 
-/********** =============== **********/
-/**********   Conditions    **********/
-/********** =============== **********/
-
-def : Pat<
-  (i1 (setcc f32:$src0, f32:$src1, SETO)),
-  (V_CMP_O_F32_e64 $src0, $src1)
->;
-
-def : Pat<
-  (i1 (setcc f32:$src0, f32:$src1, SETUO)),
-  (V_CMP_U_F32_e64 $src0, $src1)
->;
-
 //===----------------------------------------------------------------------===//
 // Conversion Patterns
 //===----------------------------------------------------------------------===//
@@ -2437,6 +2423,26 @@ def : Pat <
   (INSERT_SUBREG (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
     (S_SEXT_I32_I16 (EXTRACT_SUBREG i64:$src, sub0)), sub0),
     (S_MOV_B32 -1), sub1)
+>;
+
+def : Pat <
+  (f32 (sint_to_fp i1:$src)),
+  (V_CNDMASK_B32_e64 (i32 0), CONST.FP32_NEG_ONE, $src)
+>;
+
+def : Pat <
+  (f32 (uint_to_fp i1:$src)),
+  (V_CNDMASK_B32_e64 (i32 0), CONST.FP32_ONE, $src)
+>;
+
+def : Pat <
+  (f64 (sint_to_fp i1:$src)),
+    (V_CVT_F64_I32_e32 (V_CNDMASK_B32_e64 (i32 0), (i32 -1), $src))
+>;
+
+def : Pat <
+  (f64 (uint_to_fp i1:$src)),
+  (V_CVT_F64_U32_e32 (V_CNDMASK_B32_e64 (i32 0), (i32 1), $src))
 >;
 
 //===----------------------------------------------------------------------===//
