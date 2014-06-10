@@ -1451,10 +1451,11 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   PrintVisibility(GV->getVisibility(), Out);
   PrintDLLStorageClass(GV->getDLLStorageClass(), Out);
   PrintThreadLocalModel(GV->getThreadLocalMode(), Out);
+  if (GV->hasUnnamedAddr())
+    Out << "unnamed_addr ";
 
   if (unsigned AddressSpace = GV->getType()->getAddressSpace())
     Out << "addrspace(" << AddressSpace << ") ";
-  if (GV->hasUnnamedAddr()) Out << "unnamed_addr ";
   if (GV->isExternallyInitialized()) Out << "externally_initialized ";
   Out << (GV->isConstant() ? "constant " : "global ");
   TypePrinter.print(GV->getType()->getElementType(), Out);
@@ -1489,6 +1490,8 @@ void AssemblyWriter::printAlias(const GlobalAlias *GA) {
   PrintVisibility(GA->getVisibility(), Out);
   PrintDLLStorageClass(GA->getDLLStorageClass(), Out);
   PrintThreadLocalModel(GA->getThreadLocalMode(), Out);
+  if (GA->hasUnnamedAddr())
+    Out << "unnamed_addr ";
 
   Out << "alias ";
 
@@ -2153,10 +2156,6 @@ void NamedMDNode::print(raw_ostream &ROS) const {
 }
 
 void Type::print(raw_ostream &OS) const {
-  if (!this) {
-    OS << "<null Type>";
-    return;
-  }
   TypePrinting TP;
   TP.print(const_cast<Type*>(this), OS);
 
@@ -2169,10 +2168,6 @@ void Type::print(raw_ostream &OS) const {
 }
 
 void Value::print(raw_ostream &ROS) const {
-  if (!this) {
-    ROS << "printing a <null> value\n";
-    return;
-  }
   formatted_raw_ostream OS(ROS);
   if (const Instruction *I = dyn_cast<Instruction>(this)) {
     const Function *F = I->getParent() ? I->getParent()->getParent() : nullptr;
