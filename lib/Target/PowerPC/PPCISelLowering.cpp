@@ -856,15 +856,17 @@ static bool isConstantOrUndef(int Op, int Val) {
 
 /// isVPKUHUMShuffleMask - Return true if this is the shuffle mask for a
 /// VPKUHUM instruction.
-bool PPC::isVPKUHUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary) {
+bool PPC::isVPKUHUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary,
+                               SelectionDAG &DAG) {
+  unsigned j = DAG.getTarget().getDataLayout()->isLittleEndian() ? 0 : 1;
   if (!isUnary) {
     for (unsigned i = 0; i != 16; ++i)
-      if (!isConstantOrUndef(N->getMaskElt(i),  i*2+1))
+      if (!isConstantOrUndef(N->getMaskElt(i),  i*2+j))
         return false;
   } else {
     for (unsigned i = 0; i != 8; ++i)
-      if (!isConstantOrUndef(N->getMaskElt(i),    i*2+1) ||
-          !isConstantOrUndef(N->getMaskElt(i+8),  i*2+1))
+      if (!isConstantOrUndef(N->getMaskElt(i),    i*2+j) ||
+          !isConstantOrUndef(N->getMaskElt(i+8),  i*2+j))
         return false;
   }
   return true;
@@ -872,18 +874,27 @@ bool PPC::isVPKUHUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary) {
 
 /// isVPKUWUMShuffleMask - Return true if this is the shuffle mask for a
 /// VPKUWUM instruction.
-bool PPC::isVPKUWUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary) {
+bool PPC::isVPKUWUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary,
+                               SelectionDAG &DAG) {
+  unsigned j, k;
+  if (DAG.getTarget().getDataLayout()->isLittleEndian()) {
+    j = 0;
+    k = 1;
+  } else {
+    j = 2;
+    k = 3;
+  }
   if (!isUnary) {
     for (unsigned i = 0; i != 16; i += 2)
-      if (!isConstantOrUndef(N->getMaskElt(i  ),  i*2+2) ||
-          !isConstantOrUndef(N->getMaskElt(i+1),  i*2+3))
+      if (!isConstantOrUndef(N->getMaskElt(i  ),  i*2+j) ||
+          !isConstantOrUndef(N->getMaskElt(i+1),  i*2+k))
         return false;
   } else {
     for (unsigned i = 0; i != 8; i += 2)
-      if (!isConstantOrUndef(N->getMaskElt(i  ),  i*2+2) ||
-          !isConstantOrUndef(N->getMaskElt(i+1),  i*2+3) ||
-          !isConstantOrUndef(N->getMaskElt(i+8),  i*2+2) ||
-          !isConstantOrUndef(N->getMaskElt(i+9),  i*2+3))
+      if (!isConstantOrUndef(N->getMaskElt(i  ),  i*2+j) ||
+          !isConstantOrUndef(N->getMaskElt(i+1),  i*2+k) ||
+          !isConstantOrUndef(N->getMaskElt(i+8),  i*2+j) ||
+          !isConstantOrUndef(N->getMaskElt(i+9),  i*2+k))
         return false;
   }
   return true;
@@ -910,27 +921,39 @@ static bool isVMerge(ShuffleVectorSDNode *N, unsigned UnitSize,
 }
 
 /// isVMRGLShuffleMask - Return true if this is a shuffle mask suitable for
-/// a VRGL* instruction with the specified unit size (1,2 or 4 bytes).
+/// a VMRGL* instruction with the specified unit size (1,2 or 4 bytes).
 bool PPC::isVMRGLShuffleMask(ShuffleVectorSDNode *N, unsigned UnitSize,
-                             bool isUnary) {
-  if (!isUnary)
-    return isVMerge(N, UnitSize, 8, 24);
-  return isVMerge(N, UnitSize, 8, 8);
+                             bool isUnary, SelectionDAG &DAG) {
+  if (DAG.getTarget().getDataLayout()->isLittleEndian()) {
+    if (!isUnary)
+      return isVMerge(N, UnitSize, 0, 16);
+    return isVMerge(N, UnitSize, 0, 0);
+  } else {
+    if (!isUnary)
+      return isVMerge(N, UnitSize, 8, 24);
+    return isVMerge(N, UnitSize, 8, 8);
+  }
 }
 
 /// isVMRGHShuffleMask - Return true if this is a shuffle mask suitable for
-/// a VRGH* instruction with the specified unit size (1,2 or 4 bytes).
+/// a VMRGH* instruction with the specified unit size (1,2 or 4 bytes).
 bool PPC::isVMRGHShuffleMask(ShuffleVectorSDNode *N, unsigned UnitSize,
-                             bool isUnary) {
-  if (!isUnary)
-    return isVMerge(N, UnitSize, 0, 16);
-  return isVMerge(N, UnitSize, 0, 0);
+                             bool isUnary, SelectionDAG &DAG) {
+  if (DAG.getTarget().getDataLayout()->isLittleEndian()) {
+    if (!isUnary)
+      return isVMerge(N, UnitSize, 8, 24);
+    return isVMerge(N, UnitSize, 8, 8);
+  } else {
+    if (!isUnary)
+      return isVMerge(N, UnitSize, 0, 16);
+    return isVMerge(N, UnitSize, 0, 0);
+  }
 }
 
 
 /// isVSLDOIShuffleMask - If this is a vsldoi shuffle mask, return the shift
 /// amount, otherwise return -1.
-int PPC::isVSLDOIShuffleMask(SDNode *N, bool isUnary) {
+int PPC::isVSLDOIShuffleMask(SDNode *N, bool isUnary, SelectionDAG &DAG) {
   if (N->getValueType(0) != MVT::v16i8)
     return -1;
 
@@ -947,18 +970,38 @@ int PPC::isVSLDOIShuffleMask(SDNode *N, bool isUnary) {
   // numbered from this value.
   unsigned ShiftAmt = SVOp->getMaskElt(i);
   if (ShiftAmt < i) return -1;
-  ShiftAmt -= i;
 
-  if (!isUnary) {
-    // Check the rest of the elements to see if they are consecutive.
-    for (++i; i != 16; ++i)
-      if (!isConstantOrUndef(SVOp->getMaskElt(i), ShiftAmt+i))
-        return -1;
-  } else {
-    // Check the rest of the elements to see if they are consecutive.
-    for (++i; i != 16; ++i)
-      if (!isConstantOrUndef(SVOp->getMaskElt(i), (ShiftAmt+i) & 15))
-        return -1;
+  if (DAG.getTarget().getDataLayout()->isLittleEndian()) {
+
+    ShiftAmt += i;
+
+    if (!isUnary) {
+      // Check the rest of the elements to see if they are consecutive.
+      for (++i; i != 16; ++i)
+        if (!isConstantOrUndef(SVOp->getMaskElt(i), ShiftAmt - i))
+          return -1;
+    } else {
+      // Check the rest of the elements to see if they are consecutive.
+      for (++i; i != 16; ++i)
+        if (!isConstantOrUndef(SVOp->getMaskElt(i), (ShiftAmt - i) & 15))
+          return -1;
+    }
+
+  } else {  // Big Endian
+
+    ShiftAmt -= i;
+
+    if (!isUnary) {
+      // Check the rest of the elements to see if they are consecutive.
+      for (++i; i != 16; ++i)
+        if (!isConstantOrUndef(SVOp->getMaskElt(i), ShiftAmt+i))
+          return -1;
+    } else {
+      // Check the rest of the elements to see if they are consecutive.
+      for (++i; i != 16; ++i)
+        if (!isConstantOrUndef(SVOp->getMaskElt(i), (ShiftAmt+i) & 15))
+          return -1;
+    }
   }
   return ShiftAmt;
 }
@@ -1011,10 +1054,14 @@ bool PPC::isAllNegativeZeroVector(SDNode *N) {
 
 /// getVSPLTImmediate - Return the appropriate VSPLT* immediate to splat the
 /// specified isSplatShuffleMask VECTOR_SHUFFLE mask.
-unsigned PPC::getVSPLTImmediate(SDNode *N, unsigned EltSize) {
+unsigned PPC::getVSPLTImmediate(SDNode *N, unsigned EltSize,
+                                SelectionDAG &DAG) {
   ShuffleVectorSDNode *SVOp = cast<ShuffleVectorSDNode>(N);
   assert(isSplatShuffleMask(SVOp, EltSize));
-  return SVOp->getMaskElt(0) / EltSize;
+  if (DAG.getTarget().getDataLayout()->isLittleEndian())
+    return (16 / EltSize) - 1 - (SVOp->getMaskElt(0) / EltSize);
+  else
+    return SVOp->getMaskElt(0) / EltSize;
 }
 
 /// get_VSPLTI_elt - If this is a build_vector of constants which can be formed
@@ -5742,6 +5789,7 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   SDValue V2 = Op.getOperand(1);
   ShuffleVectorSDNode *SVOp = cast<ShuffleVectorSDNode>(Op);
   EVT VT = Op.getValueType();
+  bool isLittleEndian = PPCSubTarget.isLittleEndian();
 
   // Cases that are handled by instructions that take permute immediates
   // (such as vsplt*) should be left as VECTOR_SHUFFLE nodes so they can be
@@ -5750,15 +5798,15 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
     if (PPC::isSplatShuffleMask(SVOp, 1) ||
         PPC::isSplatShuffleMask(SVOp, 2) ||
         PPC::isSplatShuffleMask(SVOp, 4) ||
-        PPC::isVPKUWUMShuffleMask(SVOp, true) ||
-        PPC::isVPKUHUMShuffleMask(SVOp, true) ||
-        PPC::isVSLDOIShuffleMask(SVOp, true) != -1 ||
-        PPC::isVMRGLShuffleMask(SVOp, 1, true) ||
-        PPC::isVMRGLShuffleMask(SVOp, 2, true) ||
-        PPC::isVMRGLShuffleMask(SVOp, 4, true) ||
-        PPC::isVMRGHShuffleMask(SVOp, 1, true) ||
-        PPC::isVMRGHShuffleMask(SVOp, 2, true) ||
-        PPC::isVMRGHShuffleMask(SVOp, 4, true)) {
+        PPC::isVPKUWUMShuffleMask(SVOp, true, DAG) ||
+        PPC::isVPKUHUMShuffleMask(SVOp, true, DAG) ||
+        PPC::isVSLDOIShuffleMask(SVOp, true, DAG) != -1 ||
+        PPC::isVMRGLShuffleMask(SVOp, 1, true, DAG) ||
+        PPC::isVMRGLShuffleMask(SVOp, 2, true, DAG) ||
+        PPC::isVMRGLShuffleMask(SVOp, 4, true, DAG) ||
+        PPC::isVMRGHShuffleMask(SVOp, 1, true, DAG) ||
+        PPC::isVMRGHShuffleMask(SVOp, 2, true, DAG) ||
+        PPC::isVMRGHShuffleMask(SVOp, 4, true, DAG)) {
       return Op;
     }
   }
@@ -5766,15 +5814,15 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   // Altivec has a variety of "shuffle immediates" that take two vector inputs
   // and produce a fixed permutation.  If any of these match, do not lower to
   // VPERM.
-  if (PPC::isVPKUWUMShuffleMask(SVOp, false) ||
-      PPC::isVPKUHUMShuffleMask(SVOp, false) ||
-      PPC::isVSLDOIShuffleMask(SVOp, false) != -1 ||
-      PPC::isVMRGLShuffleMask(SVOp, 1, false) ||
-      PPC::isVMRGLShuffleMask(SVOp, 2, false) ||
-      PPC::isVMRGLShuffleMask(SVOp, 4, false) ||
-      PPC::isVMRGHShuffleMask(SVOp, 1, false) ||
-      PPC::isVMRGHShuffleMask(SVOp, 2, false) ||
-      PPC::isVMRGHShuffleMask(SVOp, 4, false))
+  if (PPC::isVPKUWUMShuffleMask(SVOp, false, DAG) ||
+      PPC::isVPKUHUMShuffleMask(SVOp, false, DAG) ||
+      PPC::isVSLDOIShuffleMask(SVOp, false, DAG) != -1 ||
+      PPC::isVMRGLShuffleMask(SVOp, 1, false, DAG) ||
+      PPC::isVMRGLShuffleMask(SVOp, 2, false, DAG) ||
+      PPC::isVMRGLShuffleMask(SVOp, 4, false, DAG) ||
+      PPC::isVMRGHShuffleMask(SVOp, 1, false, DAG) ||
+      PPC::isVMRGHShuffleMask(SVOp, 2, false, DAG) ||
+      PPC::isVMRGHShuffleMask(SVOp, 4, false, DAG))
     return Op;
 
   // Check to see if this is a shuffle of 4-byte values.  If so, we can use our
@@ -5808,7 +5856,9 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   // If this shuffle can be expressed as a shuffle of 4-byte elements, use the
   // perfect shuffle vector to determine if it is cost effective to do this as
   // discrete instructions, or whether we should use a vperm.
-  if (isFourElementShuffle) {
+  // For now, we skip this for little endian until such time as we have a
+  // little-endian perfect shuffle table.
+  if (isFourElementShuffle && !isLittleEndian) {
     // Compute the index in the perfect shuffle table.
     unsigned PFTableIndex =
       PFIndexes[0]*9*9*9+PFIndexes[1]*9*9+PFIndexes[2]*9+PFIndexes[3];
@@ -5844,7 +5894,6 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   // instruction.
   EVT EltVT = V1.getValueType().getVectorElementType();
   unsigned BytesPerElement = EltVT.getSizeInBits()/8;
-  bool isLittleEndian = PPCSubTarget.isLittleEndian();
 
   SmallVector<SDValue, 16> ResultMask;
   for (unsigned i = 0, e = VT.getVectorNumElements(); i != e; ++i) {
@@ -6059,6 +6108,7 @@ SDValue PPCTargetLowering::LowerMUL(SDValue Op, SelectionDAG &DAG) const {
                             LHS, RHS, Zero, DAG, dl);
   } else if (Op.getValueType() == MVT::v16i8) {
     SDValue LHS = Op.getOperand(0), RHS = Op.getOperand(1);
+    bool isLittleEndian = PPCSubTarget.isLittleEndian();
 
     // Multiply the even 8-bit parts, producing 16-bit sums.
     SDValue EvenParts = BuildIntrinsicOp(Intrinsic::ppc_altivec_vmuleub,
@@ -6070,13 +6120,24 @@ SDValue PPCTargetLowering::LowerMUL(SDValue Op, SelectionDAG &DAG) const {
                                           LHS, RHS, DAG, dl, MVT::v8i16);
     OddParts = DAG.getNode(ISD::BITCAST, dl, MVT::v16i8, OddParts);
 
-    // Merge the results together.
+    // Merge the results together.  Because vmuleub and vmuloub are
+    // instructions with a big-endian bias, we must reverse the
+    // element numbering and reverse the meaning of "odd" and "even"
+    // when generating little endian code.
     int Ops[16];
     for (unsigned i = 0; i != 8; ++i) {
-      Ops[i*2  ] = 2*i+1;
-      Ops[i*2+1] = 2*i+1+16;
+      if (isLittleEndian) {
+        Ops[i*2  ] = 2*i;
+        Ops[i*2+1] = 2*i+16;
+      } else {
+        Ops[i*2  ] = 2*i+1;
+        Ops[i*2+1] = 2*i+1+16;
+      }
     }
-    return DAG.getVectorShuffle(MVT::v16i8, dl, EvenParts, OddParts, Ops);
+    if (isLittleEndian)
+      return DAG.getVectorShuffle(MVT::v16i8, dl, OddParts, EvenParts, Ops);
+    else
+      return DAG.getVectorShuffle(MVT::v16i8, dl, EvenParts, OddParts, Ops);
   } else {
     llvm_unreachable("Unknown mul to lower!");
   }
@@ -8083,6 +8144,7 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
       // This is a type-legal unaligned Altivec load.
       SDValue Chain = LD->getChain();
       SDValue Ptr = LD->getBasePtr();
+      bool isLittleEndian = PPCSubTarget.isLittleEndian();
 
       // This implements the loading of unaligned vectors as described in
       // the venerable Apple Velocity Engine overview. Specifically:
@@ -8090,25 +8152,28 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
       // https://developer.apple.com/hardwaredrivers/ve/code_optimization.html
       //
       // The general idea is to expand a sequence of one or more unaligned
-      // loads into a alignment-based permutation-control instruction (lvsl),
-      // a series of regular vector loads (which always truncate their
-      // input address to an aligned address), and a series of permutations.
-      // The results of these permutations are the requested loaded values.
-      // The trick is that the last "extra" load is not taken from the address
-      // you might suspect (sizeof(vector) bytes after the last requested
-      // load), but rather sizeof(vector) - 1 bytes after the last
-      // requested vector. The point of this is to avoid a page fault if the
-      // base address happened to be aligned. This works because if the base
-      // address is aligned, then adding less than a full vector length will
-      // cause the last vector in the sequence to be (re)loaded. Otherwise,
-      // the next vector will be fetched as you might suspect was necessary.
+      // loads into an alignment-based permutation-control instruction (lvsl
+      // or lvsr), a series of regular vector loads (which always truncate
+      // their input address to an aligned address), and a series of
+      // permutations.  The results of these permutations are the requested
+      // loaded values.  The trick is that the last "extra" load is not taken
+      // from the address you might suspect (sizeof(vector) bytes after the
+      // last requested load), but rather sizeof(vector) - 1 bytes after the
+      // last requested vector. The point of this is to avoid a page fault if
+      // the base address happened to be aligned. This works because if the
+      // base address is aligned, then adding less than a full vector length
+      // will cause the last vector in the sequence to be (re)loaded.
+      // Otherwise, the next vector will be fetched as you might suspect was
+      // necessary.
 
       // We might be able to reuse the permutation generation from
       // a different base address offset from this one by an aligned amount.
       // The INTRINSIC_WO_CHAIN DAG combine will attempt to perform this
       // optimization later.
-      SDValue PermCntl = BuildIntrinsicOp(Intrinsic::ppc_altivec_lvsl, Ptr,
-                                          DAG, dl, MVT::v16i8);
+      Intrinsic::ID Intr = (isLittleEndian ?
+                            Intrinsic::ppc_altivec_lvsr :
+                            Intrinsic::ppc_altivec_lvsl);
+      SDValue PermCntl = BuildIntrinsicOp(Intr, Ptr, DAG, dl, MVT::v16i8);
 
       // Refine the alignment of the original load (a "new" load created here
       // which was identical to the first except for the alignment would be
@@ -8157,8 +8222,18 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
       if (ExtraLoad.getValueType() != MVT::v4i32)
         ExtraLoad = DAG.getNode(ISD::BITCAST, dl, MVT::v4i32, ExtraLoad);
 
-      SDValue Perm = BuildIntrinsicOp(Intrinsic::ppc_altivec_vperm,
-                                      BaseLoad, ExtraLoad, PermCntl, DAG, dl);
+      // Because vperm has a big-endian bias, we must reverse the order
+      // of the input vectors and complement the permute control vector
+      // when generating little endian code.  We have already handled the
+      // latter by using lvsr instead of lvsl, so just reverse BaseLoad
+      // and ExtraLoad here.
+      SDValue Perm;
+      if (isLittleEndian)
+        Perm = BuildIntrinsicOp(Intrinsic::ppc_altivec_vperm,
+                                ExtraLoad, BaseLoad, PermCntl, DAG, dl);
+      else
+        Perm = BuildIntrinsicOp(Intrinsic::ppc_altivec_vperm,
+                                BaseLoad, ExtraLoad, PermCntl, DAG, dl);
 
       if (VT != MVT::v4i32)
         Perm = DAG.getNode(ISD::BITCAST, dl, VT, Perm);
@@ -8198,9 +8273,12 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
     }
     }
     break;
-  case ISD::INTRINSIC_WO_CHAIN:
-    if (cast<ConstantSDNode>(N->getOperand(0))->getZExtValue() ==
-          Intrinsic::ppc_altivec_lvsl &&
+  case ISD::INTRINSIC_WO_CHAIN: {
+    bool isLittleEndian = PPCSubTarget.isLittleEndian();
+    Intrinsic::ID Intr = (isLittleEndian ?
+                          Intrinsic::ppc_altivec_lvsr :
+                          Intrinsic::ppc_altivec_lvsl);
+    if (cast<ConstantSDNode>(N->getOperand(0))->getZExtValue() == Intr &&
         N->getOperand(1)->getOpcode() == ISD::ADD) {
       SDValue Add = N->getOperand(1);
 
@@ -8212,8 +8290,8 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
              UE = BasePtr->use_end(); UI != UE; ++UI) {
           if (UI->getOpcode() == ISD::INTRINSIC_WO_CHAIN &&
               cast<ConstantSDNode>(UI->getOperand(0))->getZExtValue() ==
-                Intrinsic::ppc_altivec_lvsl) {
-            // We've found another LVSL, and this address if an aligned
+                Intr) {
+            // We've found another LVSL/LVSR, and this address is an aligned
             // multiple of that one. The results will be the same, so use the
             // one we've just found instead.
 
@@ -8221,6 +8299,7 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
           }
         }
       }
+    }
     }
 
     break;
