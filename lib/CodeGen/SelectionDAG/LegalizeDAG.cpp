@@ -3007,14 +3007,14 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
   case ISD::ATOMIC_LOAD: {
     // There is no libcall for atomic load; fake it with ATOMIC_CMP_SWAP.
     SDValue Zero = DAG.getConstant(0, Node->getValueType(0));
-    SDValue Swap = DAG.getAtomic(ISD::ATOMIC_CMP_SWAP, dl,
-                                 cast<AtomicSDNode>(Node)->getMemoryVT(),
-                                 Node->getOperand(0),
-                                 Node->getOperand(1), Zero, Zero,
-                                 cast<AtomicSDNode>(Node)->getMemOperand(),
-                                 cast<AtomicSDNode>(Node)->getOrdering(),
-                                 cast<AtomicSDNode>(Node)->getOrdering(),
-                                 cast<AtomicSDNode>(Node)->getSynchScope());
+    SDVTList VTs = DAG.getVTList(Node->getValueType(0), MVT::Other);
+    SDValue Swap = DAG.getAtomicCmpSwap(
+        ISD::ATOMIC_CMP_SWAP, dl, cast<AtomicSDNode>(Node)->getMemoryVT(), VTs,
+        Node->getOperand(0), Node->getOperand(1), Zero, Zero,
+        cast<AtomicSDNode>(Node)->getMemOperand(),
+        cast<AtomicSDNode>(Node)->getOrdering(),
+        cast<AtomicSDNode>(Node)->getOrdering(),
+        cast<AtomicSDNode>(Node)->getSynchScope());
     Results.push_back(Swap.getValue(0));
     Results.push_back(Swap.getValue(1));
     break;
@@ -3049,6 +3049,27 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     std::pair<SDValue, SDValue> Tmp = ExpandAtomic(Node);
     Results.push_back(Tmp.first);
     Results.push_back(Tmp.second);
+    break;
+  }
+  case ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS: {
+    // Expanding an ATOMIC_CMP_SWAP_WITH_SUCCESS produces an ATOMIC_CMP_SWAP and
+    // splits out the success value as a comparison. Expanding the resulting
+    // ATOMIC_CMP_SWAP will produce a libcall.
+    SDVTList VTs = DAG.getVTList(Node->getValueType(0), MVT::Other);
+    SDValue Res = DAG.getAtomicCmpSwap(
+        ISD::ATOMIC_CMP_SWAP, dl, cast<AtomicSDNode>(Node)->getMemoryVT(), VTs,
+        Node->getOperand(0), Node->getOperand(1), Node->getOperand(2),
+        Node->getOperand(3), cast<MemSDNode>(Node)->getMemOperand(),
+        cast<AtomicSDNode>(Node)->getSuccessOrdering(),
+        cast<AtomicSDNode>(Node)->getFailureOrdering(),
+        cast<AtomicSDNode>(Node)->getSynchScope());
+
+    SDValue Success = DAG.getSetCC(SDLoc(Node), Node->getValueType(1),
+                                   Res, Node->getOperand(2), ISD::SETEQ);
+
+    Results.push_back(Res.getValue(0));
+    Results.push_back(Success);
+    Results.push_back(Res.getValue(1));
     break;
   }
   case ISD::DYNAMIC_STACKALLOC:
@@ -3905,13 +3926,29 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     Tmp2 = Node->getOperand(1);   // RHS
     Tmp3 = Node->getOperand(2);   // True
     Tmp4 = Node->getOperand(3);   // False
+    EVT VT = Node->getValueType(0);
     SDValue CC = Node->getOperand(4);
+    ISD::CondCode CCOp = cast<CondCodeSDNode>(CC)->get();
 
+    if (TLI.isCondCodeLegal(CCOp, Tmp1.getSimpleValueType())) {
+      // If the condition code is legal, then we need to expand this
+      // node using SETCC and SELECT.
+      EVT CmpVT = Tmp1.getValueType();
+      assert(!TLI.isOperationExpand(ISD::SELECT, VT) &&
+             "Cannot expand ISD::SELECT_CC when ISD::SELECT also needs to be "
+             "expanded.");
+      EVT CCVT = TLI.getSetCCResultType(*DAG.getContext(), CmpVT);
+      SDValue Cond = DAG.getNode(ISD::SETCC, dl, CCVT, Tmp1, Tmp2, CC);
+      Results.push_back(DAG.getSelect(dl, VT, Cond, Tmp3, Tmp4));
+      break;
+    }
+
+    // SELECT_CC is legal, so the condition code must not be.
     bool Legalized = false;
     // Try to legalize by inverting the condition.  This is for targets that
     // might support an ordered version of a condition, but not the unordered
     // version (or vice versa).
-    ISD::CondCode InvCC = ISD::getSetCCInverse(cast<CondCodeSDNode>(CC)->get(),
+    ISD::CondCode InvCC = ISD::getSetCCInverse(CCOp,
                                                Tmp1.getValueType().isInteger());
     if (TLI.isCondCodeLegal(InvCC, Tmp1.getSimpleValueType())) {
       // Use the new condition code and swap true and false

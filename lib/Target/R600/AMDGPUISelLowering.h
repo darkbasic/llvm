@@ -46,6 +46,8 @@ private:
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
 
 protected:
+  static EVT getEquivalentMemType(LLVMContext &Context, EVT VT);
+  static EVT getEquivalentLoadRegType(LLVMContext &Context, EVT VT);
 
   /// \brief Helper function that adds Reg to the LiveIn list of the DAG's
   /// MachineFunction.
@@ -175,6 +177,7 @@ enum {
   // End AMDIL ISD Opcodes
   DWORDADDR,
   FRACT,
+  CLAMP,
   COS_HW,
   SIN_HW,
   FMAX,
@@ -203,6 +206,12 @@ enum {
   SAMPLEB,
   SAMPLED,
   SAMPLEL,
+
+  // These cvt_f32_ubyte* nodes need to remain consecutive and in order.
+  CVT_F32_UBYTE0,
+  CVT_F32_UBYTE1,
+  CVT_F32_UBYTE2,
+  CVT_F32_UBYTE3,
   FIRST_MEM_OPCODE_NUMBER = ISD::FIRST_TARGET_MEMORY_OPCODE,
   STORE_MSKOR,
   LOAD_CONSTANT,
