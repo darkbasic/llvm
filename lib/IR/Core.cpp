@@ -17,9 +17,9 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
-#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
@@ -35,10 +35,10 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <system_error>
 
 using namespace llvm;
 
@@ -2601,7 +2601,7 @@ LLVMBool LLVMCreateMemoryBufferWithContentsOfFile(
     char **OutMessage) {
 
   std::unique_ptr<MemoryBuffer> MB;
-  error_code ec;
+  std::error_code ec;
   if (!(ec = MemoryBuffer::getFile(Path, MB))) {
     *OutMemBuf = wrap(MB.release());
     return 0;
@@ -2614,7 +2614,7 @@ LLVMBool LLVMCreateMemoryBufferWithContentsOfFile(
 LLVMBool LLVMCreateMemoryBufferWithSTDIN(LLVMMemoryBufferRef *OutMemBuf,
                                          char **OutMessage) {
   std::unique_ptr<MemoryBuffer> MB;
-  error_code ec;
+  std::error_code ec;
   if (!(ec = MemoryBuffer::getSTDIN(MB))) {
     *OutMemBuf = wrap(MB.release());
     return 0;

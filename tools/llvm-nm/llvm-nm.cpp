@@ -37,11 +37,11 @@
 #include "llvm/Support/Program.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstring>
+#include <system_error>
 #include <vector>
 using namespace llvm;
 using namespace object;
@@ -132,7 +132,7 @@ static void error(Twine Message, Twine Path = Twine()) {
   errs() << ToolName << ": " << Path << ": " << Message << ".\n";
 }
 
-static bool error(error_code EC, Twine Path = Twine()) {
+static bool error(std::error_code EC, Twine Path = Twine()) {
   if (EC) {
     error(EC.message(), Path);
     return true;

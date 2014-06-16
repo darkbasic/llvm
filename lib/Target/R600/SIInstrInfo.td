@@ -187,6 +187,12 @@ class SOP1_64 <bits<8> op, string opName, list<dag> pattern> : SOP1 <
   opName#" $dst, $src0", pattern
 >;
 
+// 64-bit input, 32-bit output.
+class SOP1_32_64 <bits<8> op, string opName, list<dag> pattern> : SOP1 <
+  op, (outs SReg_32:$dst), (ins SSrc_64:$src0),
+  opName#" $dst, $src0", pattern
+>;
+
 class SOP2_32 <bits<7> op, string opName, list<dag> pattern> : SOP2 <
   op, (outs SReg_32:$dst), (ins SSrc_32:$src0, SSrc_32:$src1),
   opName#" $dst, $src0, $src1", pattern
@@ -475,11 +481,47 @@ class DS_Store2_Helper <bits<8> op, string asm, RegisterClass regClass> : DS_1A 
   let vdst = 0;
 }
 
+// 1 address, 1 data.
 class DS_1A1D_RET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
   op,
   (outs rc:$vdst),
-  (ins i1imm:$gds, VReg_32:$addr, VReg_32:$data0, u16imm:$offset),
+  (ins i1imm:$gds, VReg_32:$addr, rc:$data0, u16imm:$offset),
   asm#" $vdst, $addr, $data0, $offset, [M0]",
+  []> {
+
+  let data1 = 0;
+  let mayStore = 1;
+  let mayLoad = 1;
+}
+
+// 1 address, 2 data.
+class DS_1A2D_RET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+  op,
+  (outs rc:$vdst),
+  (ins i1imm:$gds, VReg_32:$addr, rc:$data0, rc:$data1, u16imm:$offset),
+  asm#" $vdst, $addr, $data0, $data1, $offset, [M0]",
+  []> {
+  let mayStore = 1;
+  let mayLoad = 1;
+}
+
+// 1 address, 2 data.
+class DS_1A2D_NORET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+  op,
+  (outs),
+  (ins i1imm:$gds, VReg_32:$addr, rc:$data0, rc:$data1, u16imm:$offset),
+  asm#" $addr, $data0, $data1, $offset, [M0]",
+  []> {
+  let mayStore = 1;
+  let mayLoad = 1;
+}
+
+// 1 address, 1 data.
+class DS_1A1D_NORET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+  op,
+  (outs),
+  (ins i1imm:$gds, VReg_32:$addr, rc:$data0, u16imm:$offset),
+  asm#" $addr, $data0, $offset, [M0]",
   []> {
 
   let data1 = 0;

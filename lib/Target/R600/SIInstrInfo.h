@@ -50,6 +50,9 @@ private:
   void splitScalar64BitBinaryOp(SmallVectorImpl<MachineInstr *> &Worklist,
                                 MachineInstr *Inst, unsigned Opcode) const;
 
+  void splitScalar64BitBCNT(SmallVectorImpl<MachineInstr *> &Worklist,
+                            MachineInstr *Inst) const;
+
   void addDescImplicitUseDef(const MCInstrDesc &Desc, MachineInstr *MI) const;
   unsigned calculateLDSSpillAddress(MachineBasicBlock &MBB,
                                     MachineBasicBlock::iterator MI,
@@ -61,7 +64,7 @@ private:
 
 
 public:
-  explicit SIInstrInfo(AMDGPUTargetMachine &tm);
+  explicit SIInstrInfo(const AMDGPUSubtarget &st);
 
   const SIRegisterInfo &getRegisterInfo() const override {
     return RI;

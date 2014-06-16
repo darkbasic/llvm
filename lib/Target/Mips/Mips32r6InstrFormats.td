@@ -40,6 +40,8 @@ def OPGROUP_PCREL    : OPGROUP<0b111011>;
 def OPGROUP_REGIMM   : OPGROUP<0b000001>;
 def OPGROUP_SPECIAL  : OPGROUP<0b000000>;
 def OPGROUP_SPECIAL3 : OPGROUP<0b011111>;
+// The spec names this constant LWC2, LDC2, SWC2, and SDC2 in different places.
+def OPGROUP_COP2LDST : OPGROUP<0b010010>;
 
 class OPCODE2<bits<2> Val> {
   bits<2> Value = Val;
@@ -64,6 +66,13 @@ def OPCODE5_BC1EQZ : OPCODE5<0b01001>;
 def OPCODE5_BC1NEZ : OPCODE5<0b01101>;
 def OPCODE5_BC2EQZ : OPCODE5<0b01001>;
 def OPCODE5_BC2NEZ : OPCODE5<0b01101>;
+def OPCODE5_BGEZAL : OPCODE5<0b10001>;
+// The next four constants are unnamed in the spec. These names are taken from
+// the OPGROUP names they are used with.
+def OPCODE5_LDC2   : OPCODE5<0b01110>;
+def OPCODE5_LWC2   : OPCODE5<0b01010>;
+def OPCODE5_SDC2   : OPCODE5<0b01111>;
+def OPCODE5_SWC2   : OPCODE5<0b01011>;
 
 class OPCODE6<bits<6> Val> {
   bits<6> Value = Val;
@@ -72,6 +81,9 @@ def OPCODE6_ALIGN    : OPCODE6<0b100000>;
 def OPCODE6_DALIGN   : OPCODE6<0b100100>;
 def OPCODE6_BITSWAP  : OPCODE6<0b100000>;
 def OPCODE6_DBITSWAP : OPCODE6<0b100100>;
+def OPCODE6_JALR     : OPCODE6<0b001001>;
+def OPCODE6_CACHE    : OPCODE6<0b100101>;
+def OPCODE6_PREF     : OPCODE6<0b110101>;
 
 class FIELD_FMT<bits<5> Val> {
   bits<5> Value = Val;
@@ -142,6 +154,17 @@ class AUI_FM : MipsR6Inst {
 
 class DAUI_FM : AUI_FM {
   let Inst{31-26} = OPGROUP_DAUI.Value;
+}
+
+class BAL_FM : MipsR6Inst {
+  bits<16> offset;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = OPGROUP_REGIMM.Value;
+  let Inst{25-21} = 0b00000;
+  let Inst{20-16} = OPCODE5_BGEZAL.Value;
+  let Inst{15-0} = offset;
 }
 
 class COP1_2R_FM<bits<6> funct, FIELD_FMT Format> : MipsR6Inst {
@@ -244,6 +267,22 @@ class SPECIAL3_2R_FM<OPCODE6 Operation> : MipsR6Inst {
   let Inst{20-16} = rt;
   let Inst{15-11} = rd;
   let Inst{10-6}  = 0b00000;
+  let Inst{5-0}   = Operation.Value;
+}
+
+class SPECIAL3_MEM_FM<OPCODE6 Operation> : MipsR6Inst {
+  bits<21> addr;
+  bits<5> hint;
+  bits<5> base = addr{20-16};
+  bits<9> offset = addr{8-0};
+
+  bits<32> Inst;
+
+  let Inst{31-26} = OPGROUP_SPECIAL3.Value;
+  let Inst{25-21} = base;
+  let Inst{20-16} = hint;
+  let Inst{15-7}  = offset;
+  let Inst{6}     = 0;
   let Inst{5-0}   = Operation.Value;
 }
 
@@ -401,3 +440,31 @@ class COP1_CMP_CONDN_FM<FIELD_CMP_FORMAT Format,
   let Inst{4-0}   = Cond.Value;
 }
 
+class JR_HB_R6_FM<OPCODE6 Operation> : MipsR6Inst {
+  bits<5> rs;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = OPGROUP_SPECIAL.Value;
+  let Inst{25-21} = rs;
+  let Inst{20-16} = 0;
+  let Inst{15-11} = 0;
+  let Inst{10} = 1;
+  let Inst{9-6} = 0;
+  let Inst{5-0} = Operation.Value;
+}
+
+class COP2LDST_FM<OPCODE5 Operation> : MipsR6Inst {
+  bits<5> rt;
+  bits<21> addr;
+  bits<5> base = addr{20-16};
+  bits<11> offset = addr{10-0};
+
+  bits<32> Inst;
+
+  let Inst{31-26} = OPGROUP_COP2LDST.Value;
+  let Inst{25-21} = Operation.Value;
+  let Inst{20-16} = rt;
+  let Inst{15-11} = base;
+  let Inst{10-0}  = offset;
+}
