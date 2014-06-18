@@ -266,7 +266,7 @@ class SIMCInstr <string pseudo, int subtarget> {
 multiclass VOP3_m <bits<9> op, dag outs, dag ins, string asm, list<dag> pattern,
                    string opName> {
 
-  def "" : InstSI <outs, ins, "", pattern>, VOP <opName>,
+  def "" : VOP3Common <outs, ins, "", pattern>, VOP <opName>,
            SIMCInstr<OpName, SISubtarget.NONE> {
     let isPseudo = 1;
   }
@@ -363,12 +363,13 @@ multiclass VOP2b_32 <bits<6> op, string opName, list<dag> pattern,
 }
 
 multiclass VOPC_Helper <bits<8> op, RegisterClass vrc, RegisterClass arc,
-                        string opName, ValueType vt, PatLeaf cond> {
-
+                        string opName, ValueType vt, PatLeaf cond, bit defExec = 0> {
   def _e32 : VOPC <
     op, (ins arc:$src0, vrc:$src1),
     opName#"_e32 $dst, $src0, $src1", []
-  >, VOP <opName>;
+  >, VOP <opName> {
+    let Defs = !if(defExec, [VCC, EXEC], [VCC]);
+  }
 
   def _e64 : VOP3 <
     {0, op{7}, op{6}, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
@@ -381,6 +382,7 @@ multiclass VOPC_Helper <bits<8> op, RegisterClass vrc, RegisterClass arc,
       [(set SReg_64:$dst, (i1 (setcc (vt arc:$src0), arc:$src1, cond)))]
     )
   >, VOP <opName> {
+    let Defs = !if(defExec, [EXEC], []);
     let src2 = SIOperand.ZERO;
     let src2_modifiers = 0;
   }
@@ -393,6 +395,14 @@ multiclass VOPC_32 <bits<8> op, string opName,
 multiclass VOPC_64 <bits<8> op, string opName,
   ValueType vt = untyped, PatLeaf cond = COND_NULL>
   : VOPC_Helper <op, VReg_64, VSrc_64, opName, vt, cond>;
+
+multiclass VOPCX_32 <bits<8> op, string opName,
+  ValueType vt = untyped, PatLeaf cond = COND_NULL>
+  : VOPC_Helper <op, VReg_32, VSrc_32, opName, vt, cond, 1>;
+
+multiclass VOPCX_64 <bits<8> op, string opName,
+  ValueType vt = untyped, PatLeaf cond = COND_NULL>
+  : VOPC_Helper <op, VReg_64, VSrc_64, opName, vt, cond, 1>;
 
 multiclass VOP3_32 <bits<9> op, string opName, list<dag> pattern> : VOP3_m <
   op, (outs VReg_32:$dst),
@@ -416,9 +426,11 @@ class VOP3_64_32 <bits <9> op, string opName, list<dag> pattern> : VOP3 <
 
 class VOP3_64 <bits<9> op, string opName, list<dag> pattern> : VOP3 <
   op, (outs VReg_64:$dst),
-  (ins VSrc_64:$src0, VSrc_64:$src1, VSrc_64:$src2,
-   InstFlag:$abs, InstFlag:$clamp, InstFlag:$omod, InstFlag:$neg),
-  opName#" $dst, $src0, $src1, $src2, $abs, $clamp, $omod, $neg", pattern
+  (ins InputMods:$src0_modifiers, VSrc_64:$src0,
+       InputMods:$src1_modifiers, VSrc_64:$src1,
+       InputMods:$src2_modifiers, VSrc_64:$src2,
+       InstFlag:$clamp, InstFlag:$omod),
+  opName#" $dst, $src0_modifiers, $src1_modifiers, $src2_modifiers, $clamp, $omod", pattern
 >, VOP <opName>;
 
 //===----------------------------------------------------------------------===//

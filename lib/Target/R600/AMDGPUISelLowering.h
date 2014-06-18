@@ -51,6 +51,11 @@ private:
   SDValue LowerSREM32(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSREM64(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFCEIL(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFTRUNC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFRINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFFLOOR(SDValue Op, SelectionDAG &DAG) const;
+
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue ExpandSIGN_EXTEND_INREG(SDValue Op,
@@ -183,6 +188,7 @@ enum {
   BFE_I32, // Extract range of bits with sign extension to 32-bits.
   BFI, // (src0 & src1) | (~src0 & src2)
   BFM, // Insert a range of bits into a 32-bit word.
+  BREV, // Reverse bits.
   MUL_U24,
   MUL_I24,
   MAD_U24,
@@ -203,6 +209,15 @@ enum {
   CVT_F32_UBYTE1,
   CVT_F32_UBYTE2,
   CVT_F32_UBYTE3,
+  /// This node is for VLIW targets and it is used to represent a vector
+  /// that is stored in consecutive registers with the same channel.
+  /// For example:
+  ///   |X  |Y|Z|W|
+  /// T0|v.x| | | |
+  /// T1|v.y| | | |
+  /// T2|v.z| | | |
+  /// T3|v.w| | | |
+  BUILD_VERTICAL_VECTOR,
   FIRST_MEM_OPCODE_NUMBER = ISD::FIRST_TARGET_MEMORY_OPCODE,
   STORE_MSKOR,
   LOAD_CONSTANT,

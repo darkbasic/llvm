@@ -9,8 +9,10 @@
         add.d     $f1,$f7,$f29
         add.s     $f8,$f21,$f24
         addi      $13,$9,26322
+        addi      $8,$8,~1             # CHECK: addi $8, $8, -2 # encoding: [0x21,0x08,0xff,0xfe]
         addu      $9,$a0,$a2
         and       $s7,$v0,$12
+        and       $2,4                 # CHECK: andi $2, $2, 4 # encoding: [0x30,0x42,0x00,0x04]
         bc1f      $fcc0, 4             # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
         bc1f      $fcc1, 4             # CHECK: bc1f $fcc1, 4 # encoding: [0x45,0x04,0x00,0x01]
         bc1f      4                    # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
@@ -31,8 +33,8 @@
         ceil.w.d  $f11,$f25
         ceil.w.s  $f6,$f20
         cfc1      $s1,$21
-        clo       $11,$a1
-        clz       $sp,$gp
+        clo       $11,$a1              # CHECK: clo $11, $5   # encoding: [0x70,0xab,0x58,0x21]
+        clz       $sp,$gp              # CHECK: clz $sp, $gp  # encoding: [0x73,0x9d,0xe8,0x20]
         ctc1      $a2,$26
         cvt.d.l   $f4,$f16
         cvt.d.s   $f22,$f28
@@ -52,8 +54,8 @@
         daddi     $sp,-27705           # CHECK: daddi $sp, $sp, -27705 # encoding: [0x63,0xbd,0x93,0xc7]
         daddiu    $k0,$s6,-4586
         daddu     $s3,$at,$ra
-        dclo      $s2,$a2
-        dclz      $s0,$25
+        dclo      $s2,$a2              # CHECK: dclo $18, $6   # encoding: [0x70,0xd2,0x90,0x25]
+        dclz      $s0,$25              # CHECK: dclz $16, $25  # encoding: [0x73,0x30,0x80,0x24]
         deret
         di        $s8
         ddiv      $zero,$k0,$s3
@@ -121,8 +123,8 @@
         lhu       $s3,-22851($v0)
         li        $at,-29773
         li        $zero,-29889
-        ll        $v0,-7321($s2)
-        lld       $zero,-14736($ra)
+        ll        $v0,-7321($s2)       # CHECK: ll $2, -7321($18)     # encoding: [0xc2,0x42,0xe3,0x67]
+        lld       $zero,-14736($ra)    # CHECK: lld $zero, -14736($ra) # encoding: [0xd3,0xe0,0xc6,0x70]
         luxc1     $f19,$s6($s5)
         lw        $8,5674($a1)
         lwc1      $f16,10225($k0)
@@ -185,6 +187,7 @@
         nop
         nor       $a3,$zero,$a3
         or        $12,$s0,$sp
+        or        $2, 4                # CHECK: ori $2, $2, 4           # encoding: [0x34,0x42,0x00,0x04]
         pause                          # CHECK: pause # encoding:  [0x00,0x00,0x01,0x40]
         pref      1, 8($5)             # CHECK: pref 1, 8($5)           # encoding: [0xcc,0xa1,0x00,0x08]
         rdhwr     $sp,$11
@@ -196,8 +199,8 @@
         round.w.d $f6,$f4
         round.w.s $f27,$f28
         sb        $s6,-19857($14)
-        sc        $15,18904($s3)
-        scd       $15,-8243($sp)
+        sc        $15,18904($s3)       # CHECK: sc $15, 18904($19)     # encoding: [0xe2,0x6f,0x49,0xd8]
+        scd       $15,-8243($sp)       # CHECK: scd $15, -8243($sp)    # encoding: [0xf3,0xaf,0xdf,0xcd]
         sd        $12,5835($10)
         sdc1      $f31,30574($13)
         sdc2      $20,23157($s2)       # CHECK: sdc2 $20, 23157($18)   # encoding: [0xfa,0x54,0x5a,0x75]
@@ -238,6 +241,8 @@
         swl       $15,13694($s3)
         swr       $s1,-26590($14)
         swxc1     $f19,$12($k0)
+        sync                           # CHECK: sync                   # encoding: [0x00,0x00,0x00,0x0f]
+        sync      1                    # CHECK: sync 1                 # encoding: [0x00,0x00,0x00,0x4f]
         teqi      $s5,-17504
         tgei      $s1,5025
         tgeiu     $sp,-28621
