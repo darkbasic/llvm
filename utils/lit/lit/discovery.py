@@ -209,10 +209,8 @@ def find_tests_for_inputs(lit_config, inputs):
                         actual_inputs.append(ln)
             finally:
                 f.close()
-        elif os.path.exists(input):
-            actual_inputs.append(input)
         else:
-            lit_config.warning('no such file or directory: %r' % input)
+            actual_inputs.append(input)
                     
     # Load the tests from the inputs.
     tests = []

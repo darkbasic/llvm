@@ -10,10 +10,12 @@
 #   rs > rt
 # appropriately for each branch instruction
 #
-# RUN: llvm-mc %s -triple=mips-unknown-linux -show-encoding -mcpu=mips64r6 | FileCheck %s
+# RUN: llvm-mc %s -triple=mips-unknown-linux -show-encoding -mcpu=mips64r6 2> %t0 | FileCheck %s
+# RUN: FileCheck %s -check-prefix=WARNING < %t0
 
         .set noat
         # FIXME: Add the instructions carried forward from older ISA's
+        and     $2,4           # CHECK: andi $2, $2, 4        # encoding: [0x30,0x42,0x00,0x04]
         addiupc $4, 100          # CHECK: addiupc $4, 100     # encoding: [0xec,0x80,0x00,0x19]
         align   $4, $2, $3, 2    # CHECK: align $4, $2, $3, 2 # encoding: [0x7c,0x43,0x22,0xa0]
         aluipc  $3, 56           # CHECK: aluipc $3, 56       # encoding: [0xec,0x7f,0x00,0x38]
@@ -51,6 +53,8 @@
         bgtzc $5, 256            # CHECK: bgtzc $5, 256       # encoding: [0x5c,0x05,0x00,0x40]
         bitswap $4, $2           # CHECK: bitswap $4, $2      # encoding: [0x7c,0x02,0x20,0x20]
         blezalc $2, 1332         # CHECK: blezalc $2, 1332    # encoding: [0x18,0x02,0x01,0x4d]
+        bltc $5, $6, 256         # CHECK: bltc $5, $6, 256    # encoding: [0x5c,0xa6,0x00,0x40]
+        bltuc $5, $6, 256        # CHECK: bltuc $5, $6, 256   # encoding: [0x1c,0xa6,0x00,0x40]
         # bnvc requires that rs >= rt but we accept both. See also bnec
         bnvc     $0, $0, 4       # CHECK: bnvc $zero, $zero, 4 # encoding: [0x60,0x00,0x00,0x01]
         bnvc     $2, $0, 4       # CHECK: bnvc $2, $zero, 4    # encoding: [0x60,0x40,0x00,0x01]
@@ -135,6 +139,7 @@
         maxa.d  $f0, $f2, $f4    # CHECK: maxa.d $f0, $f2, $f4 # encoding: [0x46,0x24,0x10,0x1f]
         mina.s  $f0, $f2, $f4    # CHECK: mina.s $f0, $f2, $f4 # encoding: [0x46,0x04,0x10,0x1e]
         mina.d  $f0, $f2, $f4    # CHECK: mina.d $f0, $f2, $f4 # encoding: [0x46,0x24,0x10,0x1e]
+        or      $2, 4            # CHECK: ori $2, $2, 4          # encoding: [0x34,0x42,0x00,0x04]
         seleqz.s $f0, $f2, $f4   # CHECK: seleqz.s $f0, $f2, $f4 # encoding: [0x46,0x04,0x10,0x14]
         seleqz.d $f0, $f2, $f4   # CHECK: seleqz.d $f0, $f2, $f4 # encoding: [0x46,0x24,0x10,0x14]
         selnez.s $f0, $f2, $f4   # CHECK: selnez.s $f0, $f2, $f4 # encoding: [0x46,0x04,0x10,0x17]
@@ -150,3 +155,15 @@
         lwc2    $18,-841($a2)    # CHECK: lwc2 $18, -841($6)     # encoding: [0x49,0x52,0x34,0xb7]
         sdc2    $20,629($s2)     # CHECK: sdc2 $20, 629($18)     # encoding: [0x49,0xf4,0x92,0x75]
         swc2    $25,304($s0)     # CHECK: swc2 $25, 304($16)     # encoding: [0x49,0x79,0x81,0x30]
+        ll      $v0,-153($s2)    # CHECK: ll $2, -153($18)       # encoding: [0x7e,0x42,0xb3,0xb6]
+        lld     $zero,112($ra)   # CHECK: lld $zero, 112($ra)    # encoding: [0x7f,0xe0,0x38,0x37]
+        sc      $15,-40($s3)     # CHECK: sc $15, -40($19)       # encoding: [0x7e,0x6f,0xec,0x26]
+        scd     $15,-51($sp)     # CHECK: scd $15, -51($sp)      # encoding: [0x7f,0xaf,0xe6,0xa7]
+        clo     $11,$a1          # CHECK: clo $11, $5            # encoding: [0x00,0xa0,0x58,0x51]
+        clz     $sp,$gp          # CHECK: clz $sp, $gp           # encoding: [0x03,0x80,0xe8,0x50]
+        dclo    $s2,$a2          # CHECK: dclo $18, $6           # encoding: [0x00,0xc0,0x90,0x53]
+        dclz    $s0,$25          # CHECK: dclz $16, $25          # encoding: [0x03,0x20,0x80,0x52]
+        ssnop                    # WARNING: [[@LINE]]:9: warning: ssnop is deprecated for MIPS64r6 and is equivalent to a nop instruction
+        ssnop                    # CHECK: ssnop                  # encoding: [0x00,0x00,0x00,0x40]
+        sync                     # CHECK: sync                   # encoding: [0x00,0x00,0x00,0x0f]
+        sync    1                # CHECK: sync 1                 # encoding: [0x00,0x00,0x00,0x4f]

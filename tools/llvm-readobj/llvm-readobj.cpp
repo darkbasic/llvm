@@ -135,6 +135,11 @@ namespace opts {
                               cl::desc("Display the ARM attributes section"));
   cl::alias ARMAttributesShort("-a", cl::desc("Alias for --arm-attributes"),
                                cl::aliasopt(ARMAttributes));
+
+  // -mips-plt-got
+  cl::opt<bool>
+  MipsPLTGOT("mips-plt-got",
+             cl::desc("Display the MIPS GOT and PLT GOT sections"));
 } // namespace opts
 
 static int ReturnValue = EXIT_SUCCESS;
@@ -175,6 +180,18 @@ static void reportError(StringRef Input, StringRef Message) {
 
   errs() << Input << ": " << Message << "\n";
   ReturnValue = EXIT_FAILURE;
+}
+
+static bool isMipsArch(unsigned Arch) {
+  switch (Arch) {
+  case llvm::Triple::mips:
+  case llvm::Triple::mipsel:
+  case llvm::Triple::mips64:
+  case llvm::Triple::mips64el:
+    return true;
+  default:
+    return false;
+  }
 }
 
 /// @brief Creates an format-specific object file dumper.
@@ -234,6 +251,9 @@ static void dumpObject(const ObjectFile *Obj) {
   if (Obj->getArch() == llvm::Triple::arm && Obj->isELF())
     if (opts::ARMAttributes)
       Dumper->printAttributes();
+  if (isMipsArch(Obj->getArch()) && Obj->isELF())
+    if (opts::MipsPLTGOT)
+      Dumper->printMipsPLTGOT();
 }
 
 
@@ -242,15 +262,15 @@ static void dumpArchive(const Archive *Arc) {
   for (Archive::child_iterator ArcI = Arc->child_begin(),
                                ArcE = Arc->child_end();
                                ArcI != ArcE; ++ArcI) {
-    std::unique_ptr<Binary> child;
-    if (std::error_code EC = ArcI->getAsBinary(child)) {
+    ErrorOr<std::unique_ptr<Binary>> ChildOrErr = ArcI->getAsBinary();
+    if (std::error_code EC = ChildOrErr.getError()) {
       // Ignore non-object files.
       if (EC != object_error::invalid_file_type)
         reportError(Arc->getFileName(), EC.message());
       continue;
     }
 
-    if (ObjectFile *Obj = dyn_cast<ObjectFile>(child.get()))
+    if (ObjectFile *Obj = dyn_cast<ObjectFile>(&*ChildOrErr.get()))
       dumpObject(Obj);
     else
       reportError(Arc->getFileName(), readobj_error::unrecognized_file_format);

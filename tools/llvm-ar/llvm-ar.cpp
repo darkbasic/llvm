@@ -369,8 +369,9 @@ static void performReadOperation(ArchiveOperation Operation,
   for (object::Archive::child_iterator I = OldArchive->child_begin(),
                                        E = OldArchive->child_end();
        I != E; ++I) {
-    StringRef Name;
-    failIfError(I->getName(Name));
+    ErrorOr<StringRef> NameOrErr = I->getName();
+    failIfError(NameOrErr.getError());
+    StringRef Name = NameOrErr.get();
 
     if (!Members.empty() &&
         std::find(Members.begin(), Members.end(), Name) == Members.end())
@@ -544,8 +545,9 @@ computeNewArchiveMembers(ArchiveOperation Operation,
                                          E = OldArchive->child_end();
          I != E; ++I) {
       int Pos = Ret.size();
-      StringRef Name;
-      failIfError(I->getName(Name));
+      ErrorOr<StringRef> NameOrErr = I->getName();
+      failIfError(NameOrErr.getError());
+      StringRef Name = NameOrErr.get();
       if (Name == PosName) {
         assert(AddAfter || AddBefore);
         if (AddBefore)
@@ -690,7 +692,6 @@ static void writeSymbolTable(
   std::string NameBuf;
   raw_string_ostream NameOS(NameBuf);
   unsigned NumSyms = 0;
-  std::vector<object::SymbolicFile *> DeleteIt;
   LLVMContext &Context = getGlobalContext();
   for (ArrayRef<NewArchiveIterator>::iterator I = Members.begin(),
                                               E = Members.end();
@@ -701,26 +702,23 @@ static void writeSymbolTable(
             MemberBuffer, false, sys::fs::file_magic::unknown, &Context);
     if (!ObjOrErr)
       continue;  // FIXME: check only for "not an object file" errors.
-    object::SymbolicFile *Obj = ObjOrErr.get();
+    std::unique_ptr<object::SymbolicFile> Obj(ObjOrErr.get());
 
-    DeleteIt.push_back(Obj);
     if (!StartOffset) {
       printMemberHeader(Out, "", sys::TimeValue::now(), 0, 0, 0, 0);
       StartOffset = Out.tell();
       print32BE(Out, 0);
     }
 
-    for (object::basic_symbol_iterator I = Obj->symbol_begin(),
-                                       E = Obj->symbol_end();
-         I != E; ++I) {
-      uint32_t Symflags = I->getFlags();
+    for (const object::BasicSymbolRef &S : Obj->symbols()) {
+      uint32_t Symflags = S.getFlags();
       if (Symflags & object::SymbolRef::SF_FormatSpecific)
         continue;
       if (!(Symflags & object::SymbolRef::SF_Global))
         continue;
       if (Symflags & object::SymbolRef::SF_Undefined)
         continue;
-      failIfError(I->printName(NameOS));
+      failIfError(S.printName(NameOS));
       NameOS << '\0';
       ++NumSyms;
       MemberOffsetRefs.push_back(std::make_pair(Out.tell(), MemberNum));
@@ -728,13 +726,6 @@ static void writeSymbolTable(
     }
   }
   Out << NameOS.str();
-
-  for (std::vector<object::SymbolicFile *>::iterator I = DeleteIt.begin(),
-                                                     E = DeleteIt.end();
-       I != E; ++I) {
-    object::SymbolicFile *O = *I;
-    delete O;
-  }
 
   if (StartOffset == 0)
     return;
@@ -783,7 +774,10 @@ static void performWriteOperation(ArchiveOperation Operation,
 
     } else {
       object::Archive::child_iterator OldMember = Member.getOld();
-      failIfError(OldMember->getMemoryBuffer(MemberBuffer));
+      ErrorOr<std::unique_ptr<MemoryBuffer>> MemberBufferOrErr =
+          OldMember->getMemoryBuffer();
+      failIfError(MemberBufferOrErr.getError());
+      MemberBuffer = std::move(MemberBufferOrErr.get());
     }
     MemberBuffers[I] = MemberBuffer.release();
   }

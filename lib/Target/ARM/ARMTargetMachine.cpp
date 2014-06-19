@@ -52,7 +52,7 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, StringRef TT,
                                            CodeGenOpt::Level OL,
                                            bool isLittle)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, isLittle, Options), JITInfo() {
+    Subtarget(TT, CPU, FS, isLittle, Options) {
 
   // Default to triple-appropriate float ABI
   if (Options.FloatABIType == FloatABI::Default)
@@ -203,8 +203,7 @@ bool ARMPassConfig::addInstSelector() {
 }
 
 bool ARMPassConfig::addPreRegAlloc() {
-  // FIXME: Temporarily disabling Thumb-1 pre-RA Load/Store optimization pass
-  if (getOptLevel() != CodeGenOpt::None && !getARMSubtarget().isThumb1Only())
+  if (getOptLevel() != CodeGenOpt::None)
     addPass(createARMLoadStoreOptimizationPass(true));
   if (getOptLevel() != CodeGenOpt::None && getARMSubtarget().isCortexA9())
     addPass(createMLxExpansionPass());
@@ -219,11 +218,8 @@ bool ARMPassConfig::addPreRegAlloc() {
 
 bool ARMPassConfig::addPreSched2() {
   if (getOptLevel() != CodeGenOpt::None) {
-    // FIXME: Temporarily disabling Thumb-1 post-RA Load/Store optimization pass
-    if (!getARMSubtarget().isThumb1Only()) {
-      addPass(createARMLoadStoreOptimizationPass());
-      printAndVerify("After ARM load / store optimizer");
-    }
+    addPass(createARMLoadStoreOptimizationPass());
+    printAndVerify("After ARM load / store optimizer");
 
     if (getARMSubtarget().hasNEON())
       addPass(createExecutionDependencyFixPass(&ARM::DPRRegClass));

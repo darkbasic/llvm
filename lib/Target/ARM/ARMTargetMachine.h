@@ -32,10 +32,6 @@ namespace llvm {
 class ARMBaseTargetMachine : public LLVMTargetMachine {
 protected:
   ARMSubtarget        Subtarget;
-
-private:
-  ARMJITInfo          JITInfo;
-
 public:
   ARMBaseTargetMachine(const Target &T, StringRef TT,
                        StringRef CPU, StringRef FS,
@@ -44,7 +40,6 @@ public:
                        CodeGenOpt::Level OL,
                        bool isLittle);
 
-  ARMJITInfo *getJITInfo() override { return &JITInfo; }
   const ARMSubtarget *getSubtargetImpl() const override { return &Subtarget; }
   const ARMTargetLowering *getTargetLowering() const override {
     // Implemented by derived classes
@@ -53,6 +48,10 @@ public:
   const InstrItineraryData *getInstrItineraryData() const override {
     return &getSubtargetImpl()->getInstrItineraryData();
   }
+  const DataLayout *getDataLayout() const override {
+    return getSubtargetImpl()->getDataLayout();
+  }
+  ARMJITInfo *getJITInfo() override { return Subtarget.getJITInfo(); }
 
   /// \brief Register ARM analysis passes with a pass manager.
   void addAnalysisPasses(PassManagerBase &PM) override;
@@ -93,9 +92,6 @@ class ARMTargetMachine : public ARMBaseTargetMachine {
     return &FrameLowering;
   }
   const ARMInstrInfo *getInstrInfo() const override { return &InstrInfo; }
-  const DataLayout *getDataLayout() const override {
-    return getSubtargetImpl()->getDataLayout();
-  }
 };
 
 /// ARMLETargetMachine - ARM little endian target machine.
@@ -159,9 +155,6 @@ public:
   /// returns either Thumb1FrameLowering or ARMFrameLowering
   const ARMFrameLowering *getFrameLowering() const override {
     return FrameLowering.get();
-  }
-  const DataLayout *getDataLayout() const override {
-    return getSubtargetImpl()->getDataLayout();
   }
 };
 

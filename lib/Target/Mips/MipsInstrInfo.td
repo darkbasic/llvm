@@ -240,6 +240,9 @@ class ISA_MIPS32R2_NOT_32R6_64R6 {
   list<Predicate> InsnPredicates = [HasMips32r2, NotMips32r6, NotMips64r6];
 }
 class ISA_MIPS64   { list<Predicate> InsnPredicates = [HasMips64]; }
+class ISA_MIPS64_NOT_64R6 {
+  list<Predicate> InsnPredicates = [HasMips64, NotMips64r6];
+}
 class ISA_MIPS64R2 { list<Predicate> InsnPredicates = [HasMips64r2]; }
 class ISA_MIPS32R6 { list<Predicate> InsnPredicates = [HasMips32r6]; }
 class ISA_MIPS64R6 { list<Predicate> InsnPredicates = [HasMips64r6]; }
@@ -1153,7 +1156,7 @@ def SWR : StoreLeftRight<"swr", MipsSWR, GPR32Opnd, II_SWR>, LW_FM<0x2e>,
           ISA_MIPS1_NOT_32R6_64R6;
 }
 
-def SYNC : MMRel, SYNC_FT<"sync">, SYNC_FM;
+def SYNC : MMRel, SYNC_FT<"sync">, SYNC_FM, ISA_MIPS32;
 def TEQ : MMRel, TEQ_FT<"teq", GPR32Opnd>, TEQ_FM<0x34>;
 def TGE : MMRel, TEQ_FT<"tge", GPR32Opnd>, TEQ_FM<0x30>;
 def TGEU : MMRel, TEQ_FT<"tgeu", GPR32Opnd>, TEQ_FM<0x31>;
@@ -1189,8 +1192,8 @@ let EncodingPredicates = []<Predicate>, // FIXME: Lack of HasStdEnc is probably 
 def WAIT : WAIT_FT<"wait">, WAIT_FM;
 
 /// Load-linked, Store-conditional
-def LL : LLBase<"ll", GPR32Opnd>, LW_FM<0x30>, ISA_MIPS2;
-def SC : SCBase<"sc", GPR32Opnd>, LW_FM<0x38>, ISA_MIPS2;
+def LL : LLBase<"ll", GPR32Opnd>, LW_FM<0x30>, ISA_MIPS2_NOT_32R6_64R6;
+def SC : SCBase<"sc", GPR32Opnd>, LW_FM<0x38>, ISA_MIPS2_NOT_32R6_64R6;
 }
 
 /// Jump and Branch Instructions
@@ -1277,8 +1280,10 @@ def SEH : MMRel, SignExtInReg<"seh", i16, GPR32Opnd, II_SEH>,
           SEB_FM<0x18, 0x20>, ISA_MIPS32R2;
 
 /// Count Leading
-def CLZ : MMRel, CountLeading0<"clz", GPR32Opnd>, CLO_FM<0x20>, ISA_MIPS32;
-def CLO : MMRel, CountLeading1<"clo", GPR32Opnd>, CLO_FM<0x21>, ISA_MIPS32;
+def CLZ : MMRel, CountLeading0<"clz", GPR32Opnd>, CLO_FM<0x20>,
+          ISA_MIPS32_NOT_32R6_64R6;
+def CLO : MMRel, CountLeading1<"clo", GPR32Opnd>, CLO_FM<0x21>,
+          ISA_MIPS32_NOT_32R6_64R6;
 
 /// Word Swap Bytes Within Halfwords
 def WSBH : MMRel, SubwordSwap<"wsbh", GPR32Opnd>, SEB_FM<2, 0x20>, ISA_MIPS32R2;
@@ -1414,6 +1419,8 @@ def : MipsInstAlias<"add $rs, $rt, $imm",
                     (ADDi GPR32Opnd:$rs, GPR32Opnd:$rt, simm16:$imm), 0>;
 def : MipsInstAlias<"and $rs, $rt, $imm",
                     (ANDi GPR32Opnd:$rs, GPR32Opnd:$rt, simm16:$imm), 0>;
+def : MipsInstAlias<"and $rs, $imm",
+                    (ANDi GPR32Opnd:$rs, GPR32Opnd:$rs, simm16:$imm), 0>;
 def : MipsInstAlias<"j $rs", (JR GPR32Opnd:$rs), 0>;
 let Predicates = [NotInMicroMips] in {
 def : MipsInstAlias<"jalr $rs", (JALR RA, GPR32Opnd:$rs), 0>;
@@ -1437,6 +1444,8 @@ def : MipsInstAlias<"xor $rs, $rt, $imm",
                     (XORi GPR32Opnd:$rs, GPR32Opnd:$rt, uimm16:$imm), 0>;
 def : MipsInstAlias<"or $rs, $rt, $imm",
                     (ORi GPR32Opnd:$rs, GPR32Opnd:$rt, uimm16:$imm), 0>;
+def : MipsInstAlias<"or $rs, $imm",
+                    (ORi GPR32Opnd:$rs, GPR32Opnd:$rs, uimm16:$imm), 0>;
 def : MipsInstAlias<"nop", (SLL ZERO, ZERO, 0), 1>;
 def : MipsInstAlias<"mfc0 $rt, $rd", (MFC0 GPR32Opnd:$rt, GPR32Opnd:$rd, 0), 0>;
 def : MipsInstAlias<"mtc0 $rt, $rd", (MTC0 GPR32Opnd:$rt, GPR32Opnd:$rd, 0), 0>;
@@ -1479,6 +1488,8 @@ def : MipsInstAlias<"sra $rd, $rt, $rs",
                     (SRAV GPR32Opnd:$rd, GPR32Opnd:$rt, GPR32Opnd:$rs), 0>;
 def : MipsInstAlias<"srl $rd, $rt, $rs",
                     (SRLV GPR32Opnd:$rd, GPR32Opnd:$rt, GPR32Opnd:$rs), 0>;
+def : MipsInstAlias<"sync",
+                    (SYNC 0), 1>, ISA_MIPS2;
 //===----------------------------------------------------------------------===//
 // Assembler Pseudo Instructions
 //===----------------------------------------------------------------------===//
@@ -1530,6 +1541,10 @@ let AdditionalPredicates = [NotDSP] in {
   def : MipsPat<(addc  GPR32:$src, immSExt16:$imm),
                 (ADDiu GPR32:$src, imm:$imm)>;
 }
+
+// SYNC
+def : MipsPat<(MipsSync (i32 immz)),
+              (SYNC 0)>, ISA_MIPS2;
 
 // Call
 def : MipsPat<(MipsJmpLink (i32 tglobaladdr:$dst)),

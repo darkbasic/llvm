@@ -23,6 +23,8 @@ def uimm16_64      : Operand<i64> {
 // Signed Operand
 def simm10_64 : Operand<i64>;
 
+def imm64: Operand<i64>;
+
 // Transformation Function - get Imm - 32.
 def Subtract32 : SDNodeXForm<imm, [{
   return getImm(N, (unsigned)N->getZExtValue() - 32);
@@ -167,8 +169,8 @@ def SDR   : StoreLeftRight<"sdr", MipsSDR, GPR64Opnd, II_SDR>, LW_FM<0x2d>,
             ISA_MIPS3_NOT_32R6_64R6;
 
 /// Load-linked, Store-conditional
-def LLD : LLBase<"lld", GPR64Opnd>, LW_FM<0x34>, ISA_MIPS3;
-def SCD : SCBase<"scd", GPR64Opnd>, LW_FM<0x3c>, ISA_MIPS3;
+def LLD : LLBase<"lld", GPR64Opnd>, LW_FM<0x34>, ISA_MIPS3_NOT_32R6_64R6;
+def SCD : SCBase<"scd", GPR64Opnd>, LW_FM<0x3c>, ISA_MIPS3_NOT_32R6_64R6;
 
 /// Jump and Branch Instructions
 let isCodeGenOnly = 1 in {
@@ -225,8 +227,8 @@ def SEH64 : SignExtInReg<"seh", i16, GPR64Opnd, II_SEH>, SEB_FM<0x18, 0x20>,
 }
 
 /// Count Leading
-def DCLZ : CountLeading0<"dclz", GPR64Opnd>, CLO_FM<0x24>, ISA_MIPS64;
-def DCLO : CountLeading1<"dclo", GPR64Opnd>, CLO_FM<0x25>, ISA_MIPS64;
+def DCLZ : CountLeading0<"dclz", GPR64Opnd>, CLO_FM<0x24>, ISA_MIPS64_NOT_64R6;
+def DCLO : CountLeading1<"dclo", GPR64Opnd>, CLO_FM<0x25>, ISA_MIPS64_NOT_64R6;
 
 /// Double Word Swap Bytes/HalfWords
 def DSBH : SubwordSwap<"dsbh", GPR64Opnd>, SEB_FM<2, 0x24>, ISA_MIPS64R2;
@@ -485,6 +487,11 @@ def : MipsInstAlias<"dsra $rd, $rt, $rs",
 def : MipsInstAlias<"dsrl $rd, $rt, $rs",
                     (DSRLV GPR64Opnd:$rd, GPR64Opnd:$rt, GPR32Opnd:$rs), 0>,
                     ISA_MIPS3;
+
+class LoadImm64< string instr_asm, Operand Od, RegisterOperand RO> :
+  MipsAsmPseudoInst<(outs RO:$rt), (ins Od:$imm64),
+                     !strconcat(instr_asm, "\t$rt, $imm64")> ;
+def LoadImm64Reg : LoadImm64<"dli", imm64, GPR64Opnd>;
 
 /// Move between CPU and coprocessor registers
 let DecoderNamespace = "Mips64", Predicates = [HasMips64] in {
