@@ -67,10 +67,7 @@ inline std::pair<uint64_t, int16_t> getRounded64(uint64_t Digits, int16_t Scale,
 
 /// \brief Adjust a 64-bit scaled number down to the appropriate width.
 ///
-/// Adjust a soft float with 64-bits of digits down, keeping as much
-/// information as possible, and rounding up on half.
-///
-/// \pre Adding 1 to \c Scale will not overflow INT16_MAX.
+/// \pre Adding 64 to \c Scale will not overflow INT16_MAX.
 template <class DigitsT>
 inline std::pair<DigitsT, int16_t> getAdjusted(uint64_t Digits,
                                                int16_t Scale = 0) {
@@ -97,8 +94,140 @@ inline std::pair<uint64_t, int16_t> getAdjusted64(uint64_t Digits,
                                                   int16_t Scale = 0) {
   return getAdjusted<uint64_t>(Digits, Scale);
 }
+
+/// \brief Multiply two 64-bit integers to create a 64-bit scaled number.
+///
+/// Implemented with four 64-bit integer multiplies.
+std::pair<uint64_t, int16_t> multiply64(uint64_t LHS, uint64_t RHS);
+
+/// \brief Multiply two 32-bit integers to create a 32-bit scaled number.
+///
+/// Implemented with one 64-bit integer multiply.
+template <class DigitsT>
+inline std::pair<DigitsT, int16_t> getProduct(DigitsT LHS, DigitsT RHS) {
+  static_assert(!std::numeric_limits<DigitsT>::is_signed, "expected unsigned");
+
+  if (getWidth<DigitsT>() <= 32 || (LHS <= UINT32_MAX && RHS <= UINT32_MAX))
+    return getAdjusted<DigitsT>(uint64_t(LHS) * RHS);
+
+  return multiply64(LHS, RHS);
 }
+
+/// \brief Convenience helper for 32-bit product.
+inline std::pair<uint32_t, int16_t> getProduct32(uint32_t LHS, uint32_t RHS) {
+  return getProduct(LHS, RHS);
 }
+
+/// \brief Convenience helper for 64-bit product.
+inline std::pair<uint64_t, int16_t> getProduct64(uint64_t LHS, uint64_t RHS) {
+  return getProduct(LHS, RHS);
+}
+
+/// \brief Divide two 64-bit integers to create a 64-bit scaled number.
+///
+/// Implemented with long division.
+///
+/// \pre \c Dividend and \c Divisor are non-zero.
+std::pair<uint64_t, int16_t> divide64(uint64_t Dividend, uint64_t Divisor);
+
+/// \brief Divide two 32-bit integers to create a 32-bit scaled number.
+///
+/// Implemented with one 64-bit integer divide/remainder pair.
+///
+/// \pre \c Dividend and \c Divisor are non-zero.
+std::pair<uint32_t, int16_t> divide32(uint32_t Dividend, uint32_t Divisor);
+
+/// \brief Divide two 32-bit numbers to create a 32-bit scaled number.
+///
+/// Implemented with one 64-bit integer divide/remainder pair.
+///
+/// Returns \c (DigitsT_MAX, INT16_MAX) for divide-by-zero (0 for 0/0).
+template <class DigitsT>
+std::pair<DigitsT, int16_t> getQuotient(DigitsT Dividend, DigitsT Divisor) {
+  static_assert(!std::numeric_limits<DigitsT>::is_signed, "expected unsigned");
+  static_assert(sizeof(DigitsT) == 4 || sizeof(DigitsT) == 8,
+                "expected 32-bit or 64-bit digits");
+
+  // Check for zero.
+  if (!Dividend)
+    return std::make_pair(0, 0);
+  if (!Divisor)
+    return std::make_pair(std::numeric_limits<DigitsT>::max(), INT16_MAX);
+
+  if (getWidth<DigitsT>() == 64)
+    return divide64(Dividend, Divisor);
+  return divide32(Dividend, Divisor);
+}
+
+/// \brief Convenience helper for 32-bit quotient.
+inline std::pair<uint32_t, int16_t> getQuotient32(uint32_t Dividend,
+                                                  uint32_t Divisor) {
+  return getQuotient(Dividend, Divisor);
+}
+
+/// \brief Convenience helper for 64-bit quotient.
+inline std::pair<uint64_t, int16_t> getQuotient64(uint64_t Dividend,
+                                                  uint64_t Divisor) {
+  return getQuotient(Dividend, Divisor);
+}
+
+/// \brief Implementation of getLg() and friends.
+///
+/// Returns the rounded lg of \c Digits*2^Scale and an int specifying whether
+/// this was rounded up (1), down (-1), or exact (0).
+///
+/// Returns \c INT32_MIN when \c Digits is zero.
+template <class DigitsT>
+inline std::pair<int32_t, int> getLgImpl(DigitsT Digits, int16_t Scale) {
+  static_assert(!std::numeric_limits<DigitsT>::is_signed, "expected unsigned");
+
+  if (!Digits)
+    return std::make_pair(INT32_MIN, 0);
+
+  // Get the floor of the lg of Digits.
+  int32_t LocalFloor = sizeof(Digits) * 8 - countLeadingZeros(Digits) - 1;
+
+  // Get the actual floor.
+  int32_t Floor = Scale + LocalFloor;
+  if (Digits == UINT64_C(1) << LocalFloor)
+    return std::make_pair(Floor, 0);
+
+  // Round based on the next digit.
+  assert(LocalFloor >= 1);
+  bool Round = Digits & UINT64_C(1) << (LocalFloor - 1);
+  return std::make_pair(Floor + Round, Round ? 1 : -1);
+}
+
+/// \brief Get the lg (rounded) of a scaled number.
+///
+/// Get the lg of \c Digits*2^Scale.
+///
+/// Returns \c INT32_MIN when \c Digits is zero.
+template <class DigitsT> int32_t getLg(DigitsT Digits, int16_t Scale) {
+  return getLgImpl(Digits, Scale).first;
+}
+
+/// \brief Get the lg floor of a scaled number.
+///
+/// Get the floor of the lg of \c Digits*2^Scale.
+///
+/// Returns \c INT32_MIN when \c Digits is zero.
+template <class DigitsT> int32_t getLgFloor(DigitsT Digits, int16_t Scale) {
+  auto Lg = getLgImpl(Digits, Scale);
+  return Lg.first - (Lg.second > 0);
+}
+
+/// \brief Get the lg ceiling of a scaled number.
+///
+/// Get the ceiling of the lg of \c Digits*2^Scale.
+///
+/// Returns \c INT32_MIN when \c Digits is zero.
+template <class DigitsT> int32_t getLgCeiling(DigitsT Digits, int16_t Scale) {
+  auto Lg = getLgImpl(Digits, Scale);
+  return Lg.first + (Lg.second < 0);
+}
+
+} // end namespace ScaledNumbers
+} // end namespace llvm
 
 #endif
-
