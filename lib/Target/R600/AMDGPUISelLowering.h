@@ -82,6 +82,7 @@ protected:
   SDValue SplitVectorStore(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIVREM(SDValue Op, SelectionDAG &DAG) const;
   bool isHWTrueValue(SDValue Op) const;
   bool isHWFalseValue(SDValue Op) const;
 
@@ -112,6 +113,7 @@ public:
   bool isNarrowingProfitable(EVT VT1, EVT VT2) const override;
 
   MVT getVectorIdxTy() const override;
+  bool isSelectSupported(SelectSupportKind) const override;
 
   bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
   bool ShouldShrinkFPConstant(EVT VT) const override;
@@ -154,11 +156,6 @@ public:
     SDValue Op,
     const SelectionDAG &DAG,
     unsigned Depth = 0) const override;
-
-private:
-  // Functions defined in AMDILISelLowering.cpp
-  void InitAMDILLowering();
-  SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
 };
 
 namespace AMDGPUISD {
