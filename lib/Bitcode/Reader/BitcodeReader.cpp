@@ -39,12 +39,11 @@ void BitcodeReader::materializeForwardReferencedFunctions() {
 }
 
 void BitcodeReader::FreeState() {
-  if (BufferOwned)
-    delete Buffer;
   Buffer = nullptr;
   std::vector<Type*>().swap(TypeList);
   ValueList.clear();
   MDValueList.clear();
+  std::vector<Comdat *>().swap(ComdatList);
 
   std::vector<AttributeSet>().swap(MAttributes);
   std::vector<BasicBlock*>().swap(FunctionBBs);
@@ -202,6 +201,22 @@ static SynchronizationScope GetDecodedSynchScope(unsigned Val) {
   case bitc::SYNCHSCOPE_SINGLETHREAD: return SingleThread;
   default: // Map unknown scopes to cross-thread.
   case bitc::SYNCHSCOPE_CROSSTHREAD: return CrossThread;
+  }
+}
+
+static Comdat::SelectionKind getDecodedComdatSelectionKind(unsigned Val) {
+  switch (Val) {
+  default: // Map unknown selection kinds to any.
+  case bitc::COMDAT_SELECTION_KIND_ANY:
+    return Comdat::Any;
+  case bitc::COMDAT_SELECTION_KIND_EXACT_MATCH:
+    return Comdat::ExactMatch;
+  case bitc::COMDAT_SELECTION_KIND_LARGEST:
+    return Comdat::Largest;
+  case bitc::COMDAT_SELECTION_KIND_NO_DUPLICATES:
+    return Comdat::NoDuplicates;
+  case bitc::COMDAT_SELECTION_KIND_SAME_SIZE:
+    return Comdat::SameSize;
   }
 }
 
@@ -1064,7 +1079,8 @@ std::error_code BitcodeReader::ParseMetadata() {
       break;
     }
     case bitc::METADATA_STRING: {
-      SmallString<8> String(Record.begin(), Record.end());
+      std::string String(Record.begin(), Record.end());
+      llvm::UpgradeMDStringConstant(String);
       Value *V = MDString::get(Context, String);
       MDValueList.AssignValue(V, NextMDValueNo++);
       break;
@@ -1839,6 +1855,20 @@ std::error_code BitcodeReader::ParseModule(bool Resume) {
       GCTable.push_back(S);
       break;
     }
+    case bitc::MODULE_CODE_COMDAT: { // COMDAT: [selection_kind, name]
+      if (Record.size() < 2)
+        return Error(InvalidRecord);
+      Comdat::SelectionKind SK = getDecodedComdatSelectionKind(Record[0]);
+      unsigned ComdatNameSize = Record[1];
+      std::string ComdatName;
+      ComdatName.reserve(ComdatNameSize);
+      for (unsigned i = 0; i != ComdatNameSize; ++i)
+        ComdatName += (char)Record[2 + i];
+      Comdat *C = TheModule->getOrInsertComdat(ComdatName);
+      C->setSelectionKind(SK);
+      ComdatList.push_back(C);
+      break;
+    }
     // GLOBALVAR: [pointer type, isconst, initid,
     //             linkage, alignment, section, visibility, threadlocal,
     //             unnamed_addr, dllstorageclass]
@@ -1899,6 +1929,12 @@ std::error_code BitcodeReader::ParseModule(bool Resume) {
       // Remember which value to use for the global initializer.
       if (unsigned InitID = Record[2])
         GlobalInits.push_back(std::make_pair(NewGV, InitID-1));
+
+      if (Record.size() > 11)
+        if (unsigned ComdatID = Record[11]) {
+          assert(ComdatID <= ComdatList.size());
+          NewGV->setComdat(ComdatList[ComdatID - 1]);
+        }
       break;
     }
     // FUNCTION:  [type, callingconv, isproto, linkage, paramattr,
@@ -1951,6 +1987,12 @@ std::error_code BitcodeReader::ParseModule(bool Resume) {
         Func->setDLLStorageClass(GetDecodedDLLStorageClass(Record[11]));
       else
         UpgradeDLLImportExportLinkage(Func, Record[3]);
+
+      if (Record.size() > 12)
+        if (unsigned ComdatID = Record[12]) {
+          assert(ComdatID <= ComdatList.size());
+          Func->setComdat(ComdatList[ComdatID - 1]);
+        }
 
       ValueList.push_back(Func);
 
@@ -3150,6 +3192,7 @@ std::error_code BitcodeReader::FindFunctionInStream(
 // GVMaterializer implementation
 //===----------------------------------------------------------------------===//
 
+void BitcodeReader::releaseBuffer() { Buffer.release(); }
 
 bool BitcodeReader::isMaterializable(const GlobalValue *GV) const {
   if (const Function *F = dyn_cast<Function>(GV)) {
@@ -3374,10 +3417,9 @@ const std::error_category &BitcodeReader::BitcodeErrorCategory() {
 /// getLazyBitcodeModule - lazy function-at-a-time loading from a file.
 ///
 ErrorOr<Module *> llvm::getLazyBitcodeModule(MemoryBuffer *Buffer,
-                                             LLVMContext &Context,
-                                             bool BufferOwned) {
+                                             LLVMContext &Context) {
   Module *M = new Module(Buffer->getBufferIdentifier(), Context);
-  BitcodeReader *R = new BitcodeReader(Buffer, Context, BufferOwned);
+  BitcodeReader *R = new BitcodeReader(Buffer, Context);
   M->setMaterializer(R);
   if (std::error_code EC = R->ParseBitcodeInto(M)) {
     R->releaseBuffer(); // Never take ownership on error.
@@ -3409,13 +3451,12 @@ Module *llvm::getStreamedBitcodeModule(const std::string &name,
 
 ErrorOr<Module *> llvm::parseBitcodeFile(MemoryBuffer *Buffer,
                                          LLVMContext &Context) {
-  ErrorOr<Module *> ModuleOrErr = getLazyBitcodeModule(Buffer, Context, false);
+  ErrorOr<Module *> ModuleOrErr = getLazyBitcodeModule(Buffer, Context);
   if (!ModuleOrErr)
     return ModuleOrErr;
   Module *M = ModuleOrErr.get();
-
   // Read in the entire module, and destroy the BitcodeReader.
-  if (std::error_code EC = M->materializeAllPermanently()) {
+  if (std::error_code EC = M->materializeAllPermanently(true)) {
     delete M;
     return EC;
   }
@@ -3429,13 +3470,14 @@ ErrorOr<Module *> llvm::parseBitcodeFile(MemoryBuffer *Buffer,
 std::string llvm::getBitcodeTargetTriple(MemoryBuffer *Buffer,
                                          LLVMContext& Context,
                                          std::string *ErrMsg) {
-  BitcodeReader *R = new BitcodeReader(Buffer, Context, /*BufferOwned*/ false);
+  BitcodeReader *R = new BitcodeReader(Buffer, Context);
 
   std::string Triple("");
   if (std::error_code EC = R->ParseTriple(Triple))
     if (ErrMsg)
       *ErrMsg = EC.message();
 
+  R->releaseBuffer();
   delete R;
   return Triple;
 }

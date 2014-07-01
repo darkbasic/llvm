@@ -148,33 +148,34 @@ bool ISD::isBuildVectorAllZeros(const SDNode *N) {
 
   if (N->getOpcode() != ISD::BUILD_VECTOR) return false;
 
-  unsigned i = 0, e = N->getNumOperands();
-
-  // Skip over all of the undef values.
-  while (i != e && N->getOperand(i).getOpcode() == ISD::UNDEF)
-    ++i;
+  bool IsAllUndef = true;
+  for (unsigned i = 0, e = N->getNumOperands(); i < e; ++i) {
+    if (N->getOperand(i).getOpcode() == ISD::UNDEF)
+      continue;
+    IsAllUndef = false;
+    // Do not accept build_vectors that aren't all constants or which have non-0
+    // elements. We have to be a bit careful here, as the type of the constant
+    // may not be the same as the type of the vector elements due to type
+    // legalization (the elements are promoted to a legal type for the target
+    // and a vector of a type may be legal when the base element type is not).
+    // We only want to check enough bits to cover the vector elements, because
+    // we care if the resultant vector is all zeros, not whether the individual
+    // constants are.
+    SDValue Zero = N->getOperand(i);
+    unsigned EltSize = N->getValueType(0).getVectorElementType().getSizeInBits();
+    if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Zero)) {
+      if (CN->getAPIntValue().countTrailingZeros() < EltSize)
+        return false;
+    } else if (ConstantFPSDNode *CFPN = dyn_cast<ConstantFPSDNode>(Zero)) {
+      if (CFPN->getValueAPF().bitcastToAPInt().countTrailingZeros() < EltSize)
+        return false;
+    } else
+      return false;
+  }
 
   // Do not accept an all-undef vector.
-  if (i == e) return false;
-
-  // Do not accept build_vectors that aren't all constants or which have non-0
-  // elements.
-  SDValue Zero = N->getOperand(i);
-  if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Zero)) {
-    if (!CN->isNullValue())
-      return false;
-  } else if (ConstantFPSDNode *CFPN = dyn_cast<ConstantFPSDNode>(Zero)) {
-    if (!CFPN->getValueAPF().isPosZero())
-      return false;
-  } else
+  if (IsAllUndef)
     return false;
-
-  // Okay, we have at least one 0 value, check to see if the rest match or are
-  // undefs.
-  for (++i; i != e; ++i)
-    if (N->getOperand(i) != Zero &&
-        N->getOperand(i).getOpcode() != ISD::UNDEF)
-      return false;
   return true;
 }
 
@@ -556,7 +557,7 @@ static void AddNodeIDNode(FoldingSetNodeID &ID, const SDNode *N) {
   // Add the return value info.
   AddNodeIDValueTypes(ID, N->getVTList());
   // Add the operand info.
-  AddNodeIDOperands(ID, makeArrayRef(N->op_begin(), N->op_end()));
+  AddNodeIDOperands(ID, N->ops());
 
   // Handle SDNode leafs with special info.
   AddNodeIDCustom(ID, N);
@@ -3630,7 +3631,7 @@ static SDValue getMemsetStringVal(EVT VT, SDLoc dl, SelectionDAG &DAG,
   if (Str.empty()) {
     if (VT.isInteger())
       return DAG.getConstant(0, VT);
-    else if (VT == MVT::f32 || VT == MVT::f64)
+    else if (VT == MVT::f32 || VT == MVT::f64 || VT == MVT::f128)
       return DAG.getConstantFP(0.0, VT);
     else if (VT.isVector()) {
       unsigned NumElts = VT.getVectorNumElements();

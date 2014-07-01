@@ -569,7 +569,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
             ConvertedShadow, IRB.getIntNTy(8 * (1 << SizeIndex)));
         IRB.CreateCall3(Fn, ConvertedShadow2,
                         IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
-                        updateOrigin(Origin, IRB));
+                        Origin);
       } else {
         Value *Cmp = IRB.CreateICmpNE(
             ConvertedShadow, getCleanShadow(ConvertedShadow), "_mscmp");
@@ -2271,12 +2271,6 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
         visitInstruction(I);
         return;
       }
-
-      // Allow only tail calls with the same types, otherwise
-      // we may have a false positive: shadow for a non-void RetVal
-      // will get propagated to a void RetVal.
-      if (Call->isTailCall() && Call->getType() != Call->getParent()->getType())
-        Call->setTailCall(false);
 
       assert(!isa<IntrinsicInst>(&I) && "intrinsics are handled elsewhere");
 
