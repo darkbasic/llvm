@@ -16,9 +16,9 @@
 #include "AMDGPUISelLowering.h"
 #include "AMDGPU.h"
 #include "AMDGPUFrameLowering.h"
+#include "AMDGPUIntrinsicInfo.h"
 #include "AMDGPURegisterInfo.h"
 #include "AMDGPUSubtarget.h"
-#include "AMDILIntrinsicInfo.h"
 #include "R600MachineFunctionInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -108,8 +108,13 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
 
   Subtarget = &TM.getSubtarget<AMDGPUSubtarget>();
 
-  // Initialize target lowering borrowed from AMDIL
-  InitAMDILLowering();
+  setOperationAction(ISD::Constant, MVT::i32, Legal);
+  setOperationAction(ISD::Constant, MVT::i64, Legal);
+  setOperationAction(ISD::ConstantFP, MVT::f32, Legal);
+  setOperationAction(ISD::ConstantFP, MVT::f64, Legal);
+
+  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+  setOperationAction(ISD::BRIND, MVT::Other, Expand);
 
   // We need to custom lower some of the intrinsics
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
@@ -133,6 +138,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
 
   setOperationAction(ISD::STORE, MVT::v2f32, Promote);
   AddPromotedToType(ISD::STORE, MVT::v2f32, MVT::v2i32);
+
+  setOperationAction(ISD::STORE, MVT::i64, Promote);
+  AddPromotedToType(ISD::STORE, MVT::i64, MVT::v2i32);
 
   setOperationAction(ISD::STORE, MVT::v4f32, Promote);
   AddPromotedToType(ISD::STORE, MVT::v4f32, MVT::v4i32);
@@ -264,7 +272,6 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::MUL, MVT::i64, Expand);
   setOperationAction(ISD::MULHU, MVT::i64, Expand);
   setOperationAction(ISD::MULHS, MVT::i64, Expand);
-  setOperationAction(ISD::SUB, MVT::i64, Expand);
   setOperationAction(ISD::UDIV, MVT::i32, Expand);
   setOperationAction(ISD::UREM, MVT::i32, Expand);
   setOperationAction(ISD::UINT_TO_FP, MVT::i64, Custom);
@@ -299,8 +306,13 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::UMUL_LOHI, VT, Expand);
     setOperationAction(ISD::SDIVREM, VT, Custom);
     setOperationAction(ISD::UDIVREM, VT, Custom);
+    setOperationAction(ISD::ADDC, VT, Expand);
+    setOperationAction(ISD::SUBC, VT, Expand);
+    setOperationAction(ISD::ADDE, VT, Expand);
+    setOperationAction(ISD::SUBE, VT, Expand);
     setOperationAction(ISD::SELECT, VT, Expand);
     setOperationAction(ISD::VSELECT, VT, Expand);
+    setOperationAction(ISD::SELECT_CC, VT, Expand);
     setOperationAction(ISD::XOR,  VT, Expand);
     setOperationAction(ISD::BSWAP, VT, Expand);
     setOperationAction(ISD::CTPOP, VT, Expand);
@@ -308,6 +320,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
     setOperationAction(ISD::CTLZ, VT, Expand);
     setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Expand);
+    setOperationAction(ISD::VECTOR_SHUFFLE, VT, Expand);
   }
 
   static const MVT::SimpleValueType FloatVectorTypes[] = {
@@ -326,6 +339,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::FFLOOR, VT, Expand);
     setOperationAction(ISD::FTRUNC, VT, Expand);
     setOperationAction(ISD::FMUL, VT, Expand);
+    setOperationAction(ISD::FMA, VT, Expand);
     setOperationAction(ISD::FRINT, VT, Expand);
     setOperationAction(ISD::FNEARBYINT, VT, Expand);
     setOperationAction(ISD::FSQRT, VT, Expand);
@@ -334,7 +348,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::FNEG, VT, Expand);
     setOperationAction(ISD::SELECT, VT, Expand);
     setOperationAction(ISD::VSELECT, VT, Expand);
+    setOperationAction(ISD::SELECT_CC, VT, Expand);
     setOperationAction(ISD::FCOPYSIGN, VT, Expand);
+    setOperationAction(ISD::VECTOR_SHUFFLE, VT, Expand);
   }
 
   setOperationAction(ISD::FNEARBYINT, MVT::f32, Custom);
@@ -346,9 +362,13 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setSchedulingPreference(Sched::RegPressure);
   setJumpIsExpensive(true);
 
+  setSelectIsExpensive(false);
+  PredictableSelectIsExpensive = false;
+
   // There are no integer divide instructions, and these expand to a pretty
   // large sequence of instructions.
   setIntDivIsCheap(false);
+  setPow2DivIsCheap(false);
 
   // TODO: Investigate this when 64-bit divides are implemented.
   addBypassSlowDiv(64, 32);
@@ -365,6 +385,10 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
 
 MVT AMDGPUTargetLowering::getVectorIdxTy() const {
   return MVT::i32;
+}
+
+bool AMDGPUTargetLowering::isSelectSupported(SelectSupportKind SelType) const {
+  return true;
 }
 
 // The backend supports 32 and 64 bit floating point immediates.
@@ -434,6 +458,10 @@ bool AMDGPUTargetLowering::isZExtFree(EVT Src, EVT Dest) const {
   return Src == MVT::i32 && Dest == MVT::i64;
 }
 
+bool AMDGPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
+  return isZExtFree(Val.getValueType(), VT2);
+}
+
 bool AMDGPUTargetLowering::isNarrowingProfitable(EVT SrcVT, EVT DestVT) const {
   // There aren't really 64-bit registers, but pairs of 32-bit ones and only a
   // limited number of native 64-bit operations. Shrinking an operation to fit
@@ -495,7 +523,6 @@ SDValue AMDGPUTargetLowering::LowerOperation(SDValue Op,
     llvm_unreachable("Custom lowering code for this"
                      "instruction is not implemented yet!");
     break;
-  // AMDGPU DAG lowering.
   case ISD::SIGN_EXTEND_INREG: return LowerSIGN_EXTEND_INREG(Op, DAG);
   case ISD::CONCAT_VECTORS: return LowerCONCAT_VECTORS(Op, DAG);
   case ISD::EXTRACT_SUBVECTOR: return LowerEXTRACT_SUBVECTOR(Op, DAG);
@@ -511,9 +538,6 @@ SDValue AMDGPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::FNEARBYINT: return LowerFNEARBYINT(Op, DAG);
   case ISD::FFLOOR: return LowerFFLOOR(Op, DAG);
   case ISD::UINT_TO_FP: return LowerUINT_TO_FP(Op, DAG);
-
-  // AMDIL DAG lowering.
-  case ISD::BRCOND: return LowerBRCOND(Op, DAG);
   }
   return Op;
 }
@@ -530,6 +554,20 @@ void AMDGPUTargetLowering::ReplaceNodeResults(SDNode *N,
     // ReplaceNodeResults to sext_in_reg to an illegal type, so we'll just do
     // nothing here and let the illegal result integer be handled normally.
     return;
+  case ISD::LOAD: {
+    SDNode *Node = LowerLOAD(SDValue(N, 0), DAG).getNode();
+    Results.push_back(SDValue(Node, 0));
+    Results.push_back(SDValue(Node, 1));
+    // XXX: LLVM seems not to replace Chain Value inside CustomWidenLowerNode
+    // function
+    DAG.ReplaceAllUsesOfValueWith(SDValue(N,1), SDValue(Node, 1));
+    return;
+  }
+  case ISD::STORE: {
+    SDNode *Node = LowerSTORE(SDValue(N, 0), DAG).getNode();
+    Results.push_back(SDValue(Node, 0));
+    return;
+  }
   default:
     return;
   }
@@ -755,9 +793,21 @@ SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
       return DAG.getNode(AMDGPUISD::CLAMP, DL, VT,
                          Op.getOperand(1), Op.getOperand(2), Op.getOperand(3));
 
-    case Intrinsic::AMDGPU_div_scale:
+    case Intrinsic::AMDGPU_div_scale: {
+      // 3rd parameter required to be a constant.
+      const ConstantSDNode *Param = dyn_cast<ConstantSDNode>(Op.getOperand(3));
+      if (!Param)
+        return DAG.getUNDEF(VT);
+
+      // Translate to the operands expected by the machine instruction. The
+      // first parameter must be the same as the first instruction.
+      SDValue Numerator = Op.getOperand(1);
+      SDValue Denominator = Op.getOperand(2);
+      SDValue Src0 = Param->isAllOnesValue() ? Numerator : Denominator;
+
       return DAG.getNode(AMDGPUISD::DIV_SCALE, DL, VT,
-                         Op.getOperand(1), Op.getOperand(2));
+                         Src0, Denominator, Numerator);
+    }
 
     case Intrinsic::AMDGPU_div_fmas:
       return DAG.getNode(AMDGPUISD::DIV_FMAS, DL, VT,
@@ -776,6 +826,12 @@ SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
 
     case Intrinsic::AMDGPU_rsq:
       return DAG.getNode(AMDGPUISD::RSQ, DL, VT, Op.getOperand(1));
+
+    case AMDGPUIntrinsic::AMDGPU_legacy_rsq:
+      return DAG.getNode(AMDGPUISD::RSQ_LEGACY, DL, VT, Op.getOperand(1));
+
+    case Intrinsic::AMDGPU_rsq_clamped:
+      return DAG.getNode(AMDGPUISD::RSQ_CLAMPED, DL, VT, Op.getOperand(1));
 
     case AMDGPUIntrinsic::AMDGPU_imax:
       return DAG.getNode(AMDGPUISD::SMAX, DL, VT, Op.getOperand(1),
@@ -1218,7 +1274,8 @@ SDValue AMDGPUTargetLowering::LowerSDIV24(SDValue Op, SelectionDAG &DAG) const {
   SDValue fb = DAG.getNode(ISD::SINT_TO_FP, DL, FLTTY, ib);
 
   // float fq = native_divide(fa, fb);
-  SDValue fq = DAG.getNode(AMDGPUISD::DIV_INF, DL, FLTTY, fa, fb);
+  SDValue fq = DAG.getNode(ISD::FMUL, DL, FLTTY,
+                           fa, DAG.getNode(AMDGPUISD::RCP, DL, FLTTY, fb));
 
   // fq = trunc(fq);
   fq = DAG.getNode(ISD::FTRUNC, DL, FLTTY, fq);
@@ -1795,6 +1852,37 @@ static SDValue constantFoldBFE(SelectionDAG &DAG, IntTy Src0,
   return DAG.getConstant(Src0 >> Offset, MVT::i32);
 }
 
+SDValue AMDGPUTargetLowering::performMulCombine(SDNode *N,
+                                                DAGCombinerInfo &DCI) const {
+  EVT VT = N->getValueType(0);
+
+  if (VT.isVector() || VT.getSizeInBits() > 32)
+    return SDValue();
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+
+  SDValue N0 = N->getOperand(0);
+  SDValue N1 = N->getOperand(1);
+  SDValue Mul;
+
+  if (Subtarget->hasMulU24() && isU24(N0, DAG) && isU24(N1, DAG)) {
+    N0 = DAG.getZExtOrTrunc(N0, DL, MVT::i32);
+    N1 = DAG.getZExtOrTrunc(N1, DL, MVT::i32);
+    Mul = DAG.getNode(AMDGPUISD::MUL_U24, DL, MVT::i32, N0, N1);
+  } else if (Subtarget->hasMulI24() && isI24(N0, DAG) && isI24(N1, DAG)) {
+    N0 = DAG.getSExtOrTrunc(N0, DL, MVT::i32);
+    N1 = DAG.getSExtOrTrunc(N1, DL, MVT::i32);
+    Mul = DAG.getNode(AMDGPUISD::MUL_I24, DL, MVT::i32, N0, N1);
+  } else {
+    return SDValue();
+  }
+
+  // We need to use sext even for MUL_U24, because MUL_U24 is used
+  // for signed multiply of 8 and 16-bit types.
+  return DAG.getSExtOrTrunc(Mul, DL, VT);
+}
+
 SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
                                             DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
@@ -1802,34 +1890,8 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
 
   switch(N->getOpcode()) {
     default: break;
-    case ISD::MUL: {
-      EVT VT = N->getValueType(0);
-      SDValue N0 = N->getOperand(0);
-      SDValue N1 = N->getOperand(1);
-      SDValue Mul;
-
-      // FIXME: Add support for 24-bit multiply with 64-bit output on SI.
-      if (VT.isVector() || VT.getSizeInBits() > 32)
-        break;
-
-      if (Subtarget->hasMulU24() && isU24(N0, DAG) && isU24(N1, DAG)) {
-        N0 = DAG.getZExtOrTrunc(N0, DL, MVT::i32);
-        N1 = DAG.getZExtOrTrunc(N1, DL, MVT::i32);
-        Mul = DAG.getNode(AMDGPUISD::MUL_U24, DL, MVT::i32, N0, N1);
-      } else if (Subtarget->hasMulI24() && isI24(N0, DAG) && isI24(N1, DAG)) {
-        N0 = DAG.getSExtOrTrunc(N0, DL, MVT::i32);
-        N1 = DAG.getSExtOrTrunc(N1, DL, MVT::i32);
-        Mul = DAG.getNode(AMDGPUISD::MUL_I24, DL, MVT::i32, N0, N1);
-      } else {
-        break;
-      }
-
-      // We need to use sext even for MUL_U24, because MUL_U24 is used
-      // for signed multiply of 8 and 16-bit types.
-      SDValue Reg = DAG.getSExtOrTrunc(Mul, DL, VT);
-
-      return Reg;
-    }
+    case ISD::MUL:
+      return performMulCombine(N, DCI);
     case AMDGPUISD::MUL_I24:
     case AMDGPUISD::MUL_U24: {
       SDValue N0 = N->getOperand(0);
@@ -2003,7 +2065,6 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   // AMDIL DAG nodes
   NODE_NAME_CASE(CALL);
   NODE_NAME_CASE(UMUL);
-  NODE_NAME_CASE(DIV_INF);
   NODE_NAME_CASE(RET_FLAG);
   NODE_NAME_CASE(BRANCH_COND);
 
@@ -2024,6 +2085,8 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(TRIG_PREOP)
   NODE_NAME_CASE(RCP)
   NODE_NAME_CASE(RSQ)
+  NODE_NAME_CASE(RSQ_LEGACY)
+  NODE_NAME_CASE(RSQ_CLAMPED)
   NODE_NAME_CASE(DOT4)
   NODE_NAME_CASE(BFE_U32)
   NODE_NAME_CASE(BFE_I32)
