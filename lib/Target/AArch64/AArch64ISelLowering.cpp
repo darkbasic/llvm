@@ -627,7 +627,7 @@ MVT AArch64TargetLowering::getScalarShiftAmountTy(EVT LHSTy) const {
 
 unsigned AArch64TargetLowering::getMaximalGlobalOffset() const {
   // FIXME: On AArch64, this depends on the type.
-  // Basically, the addressable offsets are o to 4095 * Ty.getSizeInBytes().
+  // Basically, the addressable offsets are up to 4095 * Ty.getSizeInBytes().
   // and the offset has to be a multiple of the related size in bytes.
   return 4095;
 }
@@ -1503,7 +1503,7 @@ SDValue AArch64TargetLowering::LowerFSINCOS(SDValue Op,
   StructType *RetTy = StructType::get(ArgTy, ArgTy, NULL);
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl).setChain(DAG.getEntryNode())
-    .setCallee(CallingConv::Fast, RetTy, Callee, &Args, 0);
+    .setCallee(CallingConv::Fast, RetTy, Callee, std::move(Args), 0);
 
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   return CallResult.first;
