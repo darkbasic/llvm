@@ -58,6 +58,12 @@ using namespace llvm;
 
 STATISTIC(NumTailCalls, "Number of tail calls");
 
+static cl::opt<bool> ExperimentalVectorWideningLegalization(
+    "x86-experimental-vector-widening-legalization", cl::init(false),
+    cl::desc("Enable an experimental vector type legalization through widening "
+             "rather than promotion."),
+    cl::Hidden);
+
 static cl::opt<bool> ExperimentalVectorShuffleLowering(
     "x86-experimental-vector-shuffle-lowering", cl::init(false),
     cl::desc("Enable an experimental vector shuffle lowering code path."),
@@ -1586,6 +1592,16 @@ void X86TargetLowering::resetOperationActions() {
   PredictableSelectIsExpensive = !Subtarget->isAtom();
 
   setPrefFunctionAlignment(4); // 2^4 bytes.
+}
+
+TargetLoweringBase::LegalizeTypeAction
+X86TargetLowering::getPreferredVectorAction(EVT VT) const {
+  if (ExperimentalVectorWideningLegalization &&
+      VT.getVectorNumElements() != 1 &&
+      VT.getVectorElementType().getSimpleVT() != MVT::i1)
+    return TypeWidenVector;
+
+  return TargetLoweringBase::getPreferredVectorAction(VT);
 }
 
 EVT X86TargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
@@ -16394,6 +16410,13 @@ void X86TargetLowering::ReplaceNodeResults(SDNode *N,
                                    MVT::v2f64, N->getOperand(0));
     SDValue ToVecInt = DAG.getNode(ISD::BITCAST, dl, WiderVT, Expanded);
 
+    if (ExperimentalVectorWideningLegalization) {
+      // If we are legalizing vectors by widening, we already have the desired
+      // legal vector type, just return it.
+      Results.push_back(ToVecInt);
+      return;
+    }
+
     SmallVector<SDValue, 8> Elts;
     for (unsigned i = 0, e = NumElts; i != e; ++i)
       Elts.push_back(DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, SVT,
@@ -18441,6 +18464,13 @@ static bool combineRedundantDWordShuffle(SDValue N, MutableArrayRef<int> Mask,
     M = VMask[M];
   V = DAG.getNode(X86ISD::PSHUFD, DL, MVT::v4i32, V.getOperand(0),
                   getV4X86ShuffleImm8ForMask(Mask, DAG));
+
+  // It is possible that one of the combinable shuffles was completely absorbed
+  // by the other, just replace it and revisit all users in that case.
+  if (Old.getNode() == V.getNode()) {
+    DCI.CombineTo(N.getNode(), N.getOperand(0), /*AddTo=*/true);
+    return true;
+  }
 
   // Replace N with its operand as we're going to combine that shuffle away.
   DAG.ReplaceAllUsesWith(N, N.getOperand(0));

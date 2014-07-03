@@ -13,11 +13,11 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_MC_MCMODULEYAML_H
-#define LLVM_MC_MCMODULEYAML_H
+#ifndef LLVM_MC_MCANALYSIS_MCMODULEYAML_H
+#define LLVM_MC_MCANALYSIS_MCMODULEYAML_H
 
 #include "llvm/ADT/StringRef.h"
-#include "llvm/MC/MCModule.h"
+#include "llvm/MC/MCAnalysis/MCModule.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace llvm {

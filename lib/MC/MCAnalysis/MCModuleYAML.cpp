@@ -11,13 +11,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/MC/MCModuleYAML.h"
+#include "llvm/MC/MCAnalysis/MCModuleYAML.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/MC/MCAtom.h"
-#include "llvm/MC/MCFunction.h"
+#include "llvm/MC/MCAnalysis/MCAtom.h"
+#include "llvm/MC/MCAnalysis/MCFunction.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/Object/YAML.h"
+#include "llvm/MC/YAML.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/MathExtras.h"
@@ -102,7 +102,7 @@ struct Atom {
   uint64_t Size;
 
   std::vector<Inst> Insts;
-  object::yaml::BinaryRef Data;
+  yaml::BinaryRef Data;
 };
 
 struct BasicBlock {
