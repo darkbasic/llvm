@@ -1,4 +1,4 @@
-##===- unittests/Object/Makefile ---------------------------*- Makefile -*-===##
+##===- lib/MC/MCAnalysys/Makefile --------------------------*- Makefile -*-===##
 #
 #                     The LLVM Compiler Infrastructure
 #
@@ -7,9 +7,8 @@
 #
 ##===----------------------------------------------------------------------===##
 
-LEVEL = ../..
-TESTNAME = Object
-LINK_COMPONENTS := object
+LEVEL = ../../..
+LIBRARYNAME = LLVMMCAnalysis
+BUILD_ARCHIVE := 1
 
-include $(LEVEL)/Makefile.config
-include $(LLVM_SRC_ROOT)/unittests/Makefile.unittest
+include $(LEVEL)/Makefile.common
